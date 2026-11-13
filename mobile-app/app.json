@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Stationery Indent",
+    "slug": "stationery-indent",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0f172a"
+    },
+    "ios": {
+      "supportsTablet": true
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0f172a"
+      },
+      "package": "com.college.stationeryindent"
+    },
+    "plugins": [
+      [
+        "expo-local-authentication",
+        {
+          "faceIDPermission": "Allow Stationery Indent App to use Face ID / Biometrics to confirm requisitions."
+        }
+      ]
+    ]
+  }
+}
