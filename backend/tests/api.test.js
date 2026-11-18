@@ -112,4 +112,116 @@ test('Stationery Indent Backend API - End-to-End Suite', async (t) => {
     assert.strictEqual(res.statusCode, 200);
     assert.ok(Array.isArray(res.body.data));
   });
+
+  await t.test('9. User Profile & Device Registration (/api/me)', async () => {
+    const meRes = await request(app)
+      .get('/api/me')
+      .set('Authorization', `Bearer ${facultyToken}`);
+
+    assert.strictEqual(meRes.statusCode, 200);
+    assert.strictEqual(meRes.body.data.staffId, 'FAC101');
+
+    const devRes = await request(app)
+      .post('/api/me/devices')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ deviceId: 'dev-phone-new-test', label: 'Samsung Test Device' });
+
+    assert.strictEqual(devRes.statusCode, 200);
+    assert.ok(devRes.body.data.device);
+  });
+
+  await t.test('10. Reports - Monthly Summary with Month Filter', async () => {
+    const currentMonth = new Date().toISOString().slice(0, 7);
+    const res = await request(app)
+      .get(`/api/reports/monthly?month=${currentMonth}`)
+      .set('Authorization', `Bearer ${storekeeperToken}`);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.ok(res.body.data.totalIndentsIssued >= 1);
+    assert.ok(res.body.data.byDepartment);
+  });
+
+  await t.test('11. Admin - Staff and Device Management', async () => {
+    // Admin login
+    const adminLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'EMP001', password: 'Password@123' });
+    assert.strictEqual(adminLoginRes.statusCode, 200);
+    const adminToken = adminLoginRes.body.data.token;
+
+    // Fetch users
+    const usersRes = await request(app)
+      .get('/api/users')
+      .set('Authorization', `Bearer ${adminToken}`);
+    assert.strictEqual(usersRes.statusCode, 200);
+    assert.ok(Array.isArray(usersRes.body.data));
+
+    // Create staff member
+    const newStaffRes = await request(app)
+      .post('/api/users')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({
+        staffId: 'STF999',
+        name: 'Anita Roy',
+        department: 'Library',
+        role: 'staff',
+        email: 'anita.r@college.edu'
+      });
+    assert.strictEqual(newStaffRes.statusCode, 201);
+    assert.strictEqual(newStaffRes.body.data.staffId, 'STF999');
+
+    // Reset password
+    const resetRes = await request(app)
+      .post(`/api/users/${newStaffRes.body.data._id}/reset-password`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ tempPassword: 'NewPassword@123' });
+    assert.strictEqual(resetRes.statusCode, 200);
+  });
+
+  await t.test('12. Inventory Integrity - Abort transaction on insufficient stock', async () => {
+    // Attempt indent with quantity far exceeding available stock
+    const badIndentRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [
+          { itemId: testItemId, quantity: 1 } // valid
+        ],
+        confirmation: { method: 'biometric', deviceId: 'dev-phone-aditya' },
+        remarks: 'Overdraft test'
+      });
+    assert.strictEqual(badIndentRes.statusCode, 201);
+    const overdraftIndentId = badIndentRes.body.data._id;
+
+    // Check current stock
+    const itemsBefore = await request(app)
+      .get('/api/items')
+      .set('Authorization', `Bearer ${storekeeperToken}`);
+    const beforeStock = itemsBefore.body.data.find(i => i._id === testItemId).stock;
+
+    // Storekeeper attempts to issue an exorbitant quantity (e.g. 999999)
+    const issueFailRes = await request(app)
+      .patch(`/api/indents/${overdraftIndentId}/issue`)
+      .set('Authorization', `Bearer ${storekeeperToken}`)
+      .send({
+        itemsIssued: [{ itemId: testItemId, qtyIssued: 999999 }]
+      });
+    assert.strictEqual(issueFailRes.statusCode, 400);
+
+    // Verify stock is untouched
+    const itemsAfter = await request(app)
+      .get('/api/items')
+      .set('Authorization', `Bearer ${storekeeperToken}`);
+    const afterStock = itemsAfter.body.data.find(i => i._id === testItemId).stock;
+    assert.strictEqual(afterStock, beforeStock, 'Stock must not change when issue fails');
+  });
+
+  await t.test('13. Reports - CSV Export', async () => {
+    const res = await request(app)
+      .get('/api/reports/export.csv')
+      .set('Authorization', `Bearer ${storekeeperToken}`);
+
+    assert.strictEqual(res.statusCode, 200);
+    assert.ok(res.text.includes('IndentNo,RequesterName,StaffID'));
+  });
 });

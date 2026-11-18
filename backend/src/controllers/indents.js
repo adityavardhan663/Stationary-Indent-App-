@@ -199,7 +199,8 @@ exports.issueIndent = async (req, res, next) => {
       return res.status(400).json({ message: `Cannot issue indent with status ${indent.status}` });
     }
 
-    // Process each item and apply atomic stock deduction
+    // 1. Validation pass: Ensure ALL items have sufficient stock before deducting anything
+    const plan = [];
     for (const itemRecord of indent.items) {
       const override = itemsIssued?.find(o => String(o.itemId) === String(itemRecord.item));
       const issueQty = override ? Number(override.qtyIssued) : itemRecord.qtyRequested;
@@ -207,7 +208,35 @@ exports.issueIndent = async (req, res, next) => {
       if (issueQty <= 0) continue;
 
       if (isConnected()) {
-        // Atomic stock check and reduction (Phase 8.7)
+        const dbItem = await Item.findById(itemRecord.item);
+        if (!dbItem) {
+          return res.status(400).json({ message: `Item not found: ${itemRecord.nameSnapshot}` });
+        }
+        if (dbItem.stock < issueQty) {
+          return res.status(400).json({
+            message: `Insufficient stock for '${itemRecord.nameSnapshot}'. Available: ${dbItem.stock}, requested: ${issueQty}`
+          });
+        }
+        plan.push({ itemRecord, issueQty });
+      } else {
+        const itemIdx = mem.items.findIndex(i => i._id === itemRecord.item);
+        if (itemIdx === -1) {
+          return res.status(400).json({ message: `Item not found: ${itemRecord.nameSnapshot}` });
+        }
+        if (mem.items[itemIdx].stock < issueQty) {
+          return res.status(400).json({
+            message: `Insufficient stock for '${itemRecord.nameSnapshot}'. Available: ${mem.items[itemIdx].stock}, requested: ${issueQty}`
+          });
+        }
+        plan.push({ itemRecord, itemIdx, issueQty });
+      }
+    }
+
+    // 2. Execution pass: Apply deductions and record stock transactions
+    for (const entry of plan) {
+      const { itemRecord, issueQty } = entry;
+
+      if (isConnected()) {
         const updateResult = await Item.updateOne(
           { _id: itemRecord.item, stock: { $gte: issueQty } },
           { $inc: { stock: -issueQty } }
@@ -215,7 +244,7 @@ exports.issueIndent = async (req, res, next) => {
 
         if (updateResult.modifiedCount === 0) {
           return res.status(400).json({
-            message: `Insufficient stock to issue item: '${itemRecord.nameSnapshot}'. Requisition aborted.`
+            message: `Concurrent inventory conflict for '${itemRecord.nameSnapshot}'. Requisition aborted.`
           });
         }
 
@@ -233,16 +262,7 @@ exports.issueIndent = async (req, res, next) => {
           at: new Date()
         });
       } else {
-        const itemIdx = mem.items.findIndex(i => i._id === itemRecord.item);
-        if (itemIdx === -1) {
-          return res.status(400).json({ message: `Item not found: ${itemRecord.nameSnapshot}` });
-        }
-        if (mem.items[itemIdx].stock < issueQty) {
-          return res.status(400).json({
-            message: `Insufficient stock for '${itemRecord.nameSnapshot}'. Available: ${mem.items[itemIdx].stock}, requested: ${issueQty}`
-          });
-        }
-
+        const { itemIdx } = entry;
         mem.items[itemIdx].stock -= issueQty;
         itemRecord.qtyIssued = issueQty;
 

@@ -1,19 +1,19 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Package, 
-  ClipboardList, 
-  AlertTriangle, 
-  TrendingUp, 
-  CheckCircle, 
-  Clock, 
-  Smartphone, 
-  ShieldCheck, 
-  Users, 
-  FileText, 
-  Search, 
-  Plus, 
-  Download, 
-  RefreshCw, 
+import {
+  Package,
+  ClipboardList,
+  AlertTriangle,
+  TrendingUp,
+  CheckCircle,
+  Clock,
+  Smartphone,
+  ShieldCheck,
+  Users,
+  FileText,
+  Search,
+  Plus,
+  Download,
+  RefreshCw,
   LogOut,
   Fingerprint,
   Printer
@@ -40,6 +40,8 @@ export default function App() {
   // Form states
   const [newItemModal, setNewItemModal] = useState(false);
   const [newItem, setNewItem] = useState({ name: '', code: '', category: 'Writing', unit: 'box', stock: 20, reorderLevel: 5, maxPerIndent: 5 });
+  const [newUserModal, setNewUserModal] = useState(false);
+  const [newUser, setNewUser] = useState({ staffId: '', name: '', department: 'Computer Science', role: 'faculty', email: '', phone: '' });
   const [stockInForm, setStockInForm] = useState({ itemId: '', quantity: 10, reference: 'INV-2026-901', supplier: 'Central Stationery Depot' });
   const [searchFilter, setSearchFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -220,6 +222,106 @@ export default function App() {
     }
   };
 
+  // Download CSV with JWT Authorization header
+  const handleDownloadCsv = async () => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/reports/export.csv`, {
+        headers: getAuthHeaders()
+      });
+      if (!res.ok) {
+        showNotification('Failed to download CSV report', 'error');
+        return;
+      }
+      const blob = await res.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `stationery_indents_${new Date().toISOString().slice(0, 10)}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.URL.revokeObjectURL(url);
+      showNotification('Indent register exported to CSV');
+    } catch (err) {
+      showNotification('Export error: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Device approval toggle (Admin)
+  const handleToggleDeviceApproval = async (userId, deviceId, currentStatus) => {
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/users/${userId}/devices/${deviceId}`, {
+        method: 'PATCH',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ approved: !currentStatus })
+      });
+      const json = await res.json();
+      if (res.ok) {
+        showNotification(json.data?.message || 'Device status updated');
+        fetchData();
+      } else {
+        showNotification(json.message || 'Device approval failed', 'error');
+      }
+    } catch (err) {
+      showNotification('Error updating device: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Reset password (Admin)
+  const handleResetUserPassword = async (userId, userName) => {
+    if (!window.confirm(`Reset password for ${userName} to default ('Password@123')?`)) return;
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/users/${userId}/reset-password`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify({ tempPassword: 'Password@123' })
+      });
+      const json = await res.json();
+      if (res.ok) {
+        showNotification(json.data?.message || `Password reset for ${userName}`);
+      } else {
+        showNotification(json.message || 'Password reset failed', 'error');
+      }
+    } catch (err) {
+      showNotification('Error resetting password: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Create User submit (Admin)
+  const handleCreateUserSubmit = async (e) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_BASE}/users`, {
+        method: 'POST',
+        headers: getAuthHeaders(),
+        body: JSON.stringify(newUser)
+      });
+      const json = await res.json();
+      if (res.ok) {
+        showNotification(`User '${newUser.name}' (${newUser.staffId}) created successfully!`);
+        setNewUserModal(false);
+        setNewUser({ staffId: '', name: '', department: 'Computer Science', role: 'faculty', email: '', phone: '' });
+        fetchData();
+      } else {
+        showNotification(json.message || 'Could not create user', 'error');
+      }
+    } catch (err) {
+      showNotification('User creation error: ' + err.message, 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
   // Mobile App Simulation submit
   const handleMobileSubmitIndent = async () => {
     if (mobileCart.length === 0) {
@@ -345,18 +447,18 @@ export default function App() {
           <div style={{ fontSize: 13, fontWeight: 600 }}>{currentUser.name}</div>
           <div style={{ fontSize: 11, color: '#94a3b8' }}>{currentUser.department} &bull; <strong style={{ color: '#38bdf8' }}>{currentUser.role.toUpperCase()}</strong></div>
           <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-            <button 
-              onClick={() => handleQuickLogin('SK001')} 
+            <button
+              onClick={() => handleQuickLogin('SK001')}
               style={{ fontSize: 11, padding: '4px 8px', background: currentUser.role === 'storekeeper' ? '#1d4ed8' : '#334155', color: '#fff' }}>
               Storekeeper
             </button>
-            <button 
-              onClick={() => handleQuickLogin('EMP001')} 
+            <button
+              onClick={() => handleQuickLogin('EMP001')}
               style={{ fontSize: 11, padding: '4px 8px', background: currentUser.role === 'admin' ? '#1d4ed8' : '#334155', color: '#fff' }}>
               Admin
             </button>
-            <button 
-              onClick={() => handleQuickLogin('FAC101')} 
+            <button
+              onClick={() => handleQuickLogin('FAC101')}
               style={{ fontSize: 11, padding: '4px 8px', background: currentUser.role === 'faculty' ? '#1d4ed8' : '#334155', color: '#fff' }}>
               Faculty
             </button>
@@ -383,10 +485,10 @@ export default function App() {
 
           <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
             {feedback && (
-              <div style={{ 
-                padding: '6px 14px', 
-                borderRadius: 6, 
-                fontSize: 13, 
+              <div style={{
+                padding: '6px 14px',
+                borderRadius: 6,
+                fontSize: 13,
                 fontWeight: 600,
                 background: feedback.type === 'error' ? '#fee2e2' : '#dcfce7',
                 color: feedback.type === 'error' ? '#991b1b' : '#166534',
@@ -486,9 +588,9 @@ export default function App() {
                             </ul>
                           </td>
                           <td>
-                            <button 
+                            <button
                               onClick={() => handleIssueIndent(ind._id, ind.indentNo)}
-                              className="btn-success" 
+                              className="btn-success"
                               style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', fontSize: 14 }}>
                               <CheckCircle size={16} />
                               <span>Issue & Deduct Stock</span>
@@ -565,17 +667,17 @@ export default function App() {
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
                 <div style={{ display: 'flex', gap: 10 }}>
-                  <input 
-                    type="text" 
-                    placeholder="Search stationery by name or code..." 
+                  <input
+                    type="text"
+                    placeholder="Search stationery by name or code..."
                     value={searchFilter}
                     onChange={e => setSearchFilter(e.target.value)}
                     style={{ width: 320 }}
                   />
                 </div>
-                <button 
+                <button
                   onClick={() => setNewItemModal(true)}
-                  className="btn-primary" 
+                  className="btn-primary"
                   style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Plus size={16} />
                   <span>Add New Item</span>
@@ -631,8 +733,8 @@ export default function App() {
                 <form onSubmit={handleStockInSubmit} style={{ padding: 24, display: 'flex', flexDirection: 'column', gap: 16 }}>
                   <div>
                     <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Select Item</label>
-                    <select 
-                      value={stockInForm.itemId} 
+                    <select
+                      value={stockInForm.itemId}
                       onChange={e => setStockInForm({ ...stockInForm, itemId: e.target.value })}
                       style={{ width: '100%' }}
                       required>
@@ -647,32 +749,32 @@ export default function App() {
 
                   <div>
                     <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Quantity Received</label>
-                    <input 
-                      type="number" 
+                    <input
+                      type="number"
                       min="1"
-                      value={stockInForm.quantity} 
+                      value={stockInForm.quantity}
                       onChange={e => setStockInForm({ ...stockInForm, quantity: Number(e.target.value) })}
                       style={{ width: '100%' }}
-                      required 
+                      required
                     />
                   </div>
 
                   <div>
                     <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Invoice / Challan Reference #</label>
-                    <input 
-                      type="text" 
-                      value={stockInForm.reference} 
+                    <input
+                      type="text"
+                      value={stockInForm.reference}
                       onChange={e => setStockInForm({ ...stockInForm, reference: e.target.value })}
                       style={{ width: '100%' }}
-                      required 
+                      required
                     />
                   </div>
 
                   <div>
                     <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 6 }}>Supplier Name</label>
-                    <input 
-                      type="text" 
-                      value={stockInForm.supplier} 
+                    <input
+                      type="text"
+                      value={stockInForm.supplier}
                       onChange={e => setStockInForm({ ...stockInForm, supplier: e.target.value })}
                       style={{ width: '100%' }}
                     />
@@ -690,9 +792,9 @@ export default function App() {
           {activeTab === 'history' && (
             <div>
               <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
-                <input 
-                  type="text" 
-                  placeholder="Filter by Indent #..." 
+                <input
+                  type="text"
+                  placeholder="Filter by Indent #..."
                   value={searchFilter}
                   onChange={e => setSearchFilter(e.target.value)}
                   style={{ width: 260 }}
@@ -750,10 +852,10 @@ export default function App() {
                   <h3 style={{ fontSize: 18 }}>Low Stock Threshold Alerts</h3>
                   <p style={{ fontSize: 13, color: '#64748b' }}>Items at or below defined college reorder minimums</p>
                 </div>
-                <a href={`${API_BASE}/reports/export.csv`} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}>
+                <button onClick={handleDownloadCsv} className="btn-secondary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Download size={14} />
                   <span>Download Indent Register (CSV)</span>
-                </a>
+                </button>
               </div>
 
               <div className="card">
@@ -775,6 +877,97 @@ export default function App() {
                         <td style={{ color: '#dc2626', fontWeight: 700, fontSize: 16 }}>{it.stock} {it.unit}</td>
                         <td>{it.reorderLevel} {it.unit}</td>
                         <td><span className="badge badge-low-stock">Urgent Reorder</span></td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* TAB: USERS & DEVICE SECURITY (Admin only) */}
+          {activeTab === 'users' && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <h3 style={{ fontSize: 18 }}>Staff Accounts & Registered Devices</h3>
+                  <p style={{ fontSize: 13, color: '#64748b' }}>Manage user roles and approve mobile biometric hardware tokens</p>
+                </div>
+                <button
+                  onClick={() => setNewUserModal(true)}
+                  className="btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Plus size={16} />
+                  <span>Add Staff Member</span>
+                </button>
+              </div>
+
+              <div className="card">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Staff ID</th>
+                      <th>Name / Dept</th>
+                      <th>Role</th>
+                      <th>Status</th>
+                      <th>Registered Devices & Biometrics</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {usersList.map(u => (
+                      <tr key={u._id}>
+                        <td><code>{u.staffId}</code></td>
+                        <td>
+                          <strong>{u.name}</strong>
+                          <div style={{ fontSize: 12, color: '#64748b' }}>{u.department} {u.email ? `• ${u.email}` : ''}</div>
+                        </td>
+                        <td>
+                          <span style={{ textTransform: 'uppercase', fontSize: 12, fontWeight: 700, color: '#2563eb' }}>
+                            {u.role}
+                          </span>
+                        </td>
+                        <td>
+                          <span className={`badge ${u.active ? 'badge-issued' : 'badge-cancelled'}`}>
+                            {u.active ? 'Active' : 'Deactivated'}
+                          </span>
+                        </td>
+                        <td>
+                          {(!u.devices || u.devices.length === 0) ? (
+                            <span style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>No devices registered</span>
+                          ) : (
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                              {u.devices.map((d, dIdx) => (
+                                <div key={dIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', padding: '4px 8px', borderRadius: 4, border: '1px solid #e2e8f0' }}>
+                                  <Smartphone size={14} color="#64748b" />
+                                  <span style={{ fontSize: 12, fontWeight: 600 }}>{d.label || d.deviceId}</span>
+                                  <span className={`badge ${d.approved ? 'badge-issued' : 'badge-requested'}`} style={{ fontSize: 10 }}>
+                                    {d.approved ? 'Approved' : 'Pending'}
+                                  </span>
+                                  <button
+                                    onClick={() => handleToggleDeviceApproval(u._id, d.deviceId, d.approved)}
+                                    style={{
+                                      fontSize: 11,
+                                      padding: '2px 6px',
+                                      background: d.approved ? '#fee2e2' : '#dcfce7',
+                                      color: d.approved ? '#991b1b' : '#166534',
+                                      marginLeft: 'auto'
+                                    }}>
+                                    {d.approved ? 'Revoke' : 'Approve'}
+                                  </button>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          <button
+                            onClick={() => handleResetUserPassword(u._id, u.name)}
+                            className="btn-secondary"
+                            style={{ fontSize: 12, padding: '4px 10px' }}>
+                            Reset Password
+                          </button>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -853,7 +1046,7 @@ export default function App() {
                         <div style={{ fontSize: 18, fontWeight: 700, color: '#38bdf8' }}>{mobileSuccessIndent.indentNo}</div>
                       </div>
                       <p style={{ fontSize: 12, color: '#94a3b8' }}>Confirmed via phone fingerprint. Walk to the counter to collect your items.</p>
-                      <button 
+                      <button
                         onClick={() => setMobileSuccessIndent(null)}
                         style={{ marginTop: 24, width: '100%', padding: 12, background: '#2563eb', color: '#fff' }}>
                         Make Another Request
@@ -874,16 +1067,16 @@ export default function App() {
                               <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                                 {inCart ? (
                                   <>
-                                    <button 
+                                    <button
                                       onClick={() => setMobileCart(mobileCart.map(c => c.itemId === it._id ? { ...c, qty: Math.max(0, c.qty - 1) } : c).filter(c => c.qty > 0))}
                                       style={{ width: 26, height: 26, background: '#334155', color: '#fff', borderRadius: 4 }}>-</button>
                                     <span style={{ fontSize: 13, fontWeight: 700 }}>{inCart.qty}</span>
-                                    <button 
+                                    <button
                                       onClick={() => setMobileCart(mobileCart.map(c => c.itemId === it._id ? { ...c, qty: c.qty + 1 } : c))}
                                       style={{ width: 26, height: 26, background: '#334155', color: '#fff', borderRadius: 4 }}>+</button>
                                   </>
                                 ) : (
-                                  <button 
+                                  <button
                                     onClick={() => setMobileCart([...mobileCart, { itemId: it._id, name: it.name, qty: 1 }])}
                                     style={{ fontSize: 12, padding: '4px 10px', background: '#2563eb', color: '#fff' }}>Add</button>
                                 )}
@@ -908,9 +1101,9 @@ export default function App() {
                       )}
 
                       <div style={{ marginBottom: 16 }}>
-                        <input 
-                          type="text" 
-                          placeholder="Requisition purpose / remark..." 
+                        <input
+                          type="text"
+                          placeholder="Requisition purpose / remark..."
                           value={mobileRemarks}
                           onChange={e => setMobileRemarks(e.target.value)}
                           style={{ width: '100%', background: '#1e293b', border: '1px solid #334155', color: '#fff', fontSize: 12 }}
@@ -923,7 +1116,7 @@ export default function App() {
                           Touch fingerprint sensor to confirm Requisition
                         </div>
 
-                        <button 
+                        <button
                           onClick={handleMobileSubmitIndent}
                           disabled={biometricScanning || mobileCart.length === 0}
                           style={{
@@ -963,21 +1156,21 @@ export default function App() {
             <form onSubmit={handleCreateItemSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div>
                 <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Item Name</label>
-                <input 
-                  type="text" 
-                  value={newItem.name} 
+                <input
+                  type="text"
+                  value={newItem.name}
                   onChange={e => setNewItem({ ...newItem, name: e.target.value })}
                   placeholder="e.g. Spiral Notebook 200 Pages"
                   style={{ width: '100%' }}
-                  required 
+                  required
                 />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Item Code</label>
-                  <input 
-                    type="text" 
-                    value={newItem.code} 
+                  <input
+                    type="text"
+                    value={newItem.code}
                     onChange={e => setNewItem({ ...newItem, code: e.target.value })}
                     placeholder="e.g. NOT-SPR-200"
                     style={{ width: '100%' }}
@@ -985,43 +1178,139 @@ export default function App() {
                 </div>
                 <div>
                   <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Unit</label>
-                  <input 
-                    type="text" 
-                    value={newItem.unit} 
+                  <input
+                    type="text"
+                    value={newItem.unit}
                     onChange={e => setNewItem({ ...newItem, unit: e.target.value })}
                     placeholder="piece / box / ream"
                     style={{ width: '100%' }}
-                    required 
+                    required
                   />
                 </div>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
                   <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Opening Stock</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     min="0"
-                    value={newItem.stock} 
+                    value={newItem.stock}
                     onChange={e => setNewItem({ ...newItem, stock: Number(e.target.value) })}
                     style={{ width: '100%' }}
-                    required 
+                    required
                   />
                 </div>
                 <div>
                   <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Reorder Alert Level</label>
-                  <input 
-                    type="number" 
+                  <input
+                    type="number"
                     min="1"
-                    value={newItem.reorderLevel} 
+                    value={newItem.reorderLevel}
                     onChange={e => setNewItem({ ...newItem, reorderLevel: Number(e.target.value) })}
                     style={{ width: '100%' }}
-                    required 
+                    required
                   />
                 </div>
               </div>
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
                 <button type="button" onClick={() => setNewItemModal(false)} className="btn-secondary">Cancel</button>
                 <button type="submit" className="btn-primary">Save Item</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Add New Staff Member */}
+      {newUserModal && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div style={{ background: '#fff', width: 460, borderRadius: 8, overflow: 'hidden' }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid #e2e8f0', display: 'flex', justifyContent: 'space-between' }}>
+              <h3 style={{ fontSize: 16 }}>Register New Staff Member</h3>
+              <button onClick={() => setNewUserModal(false)} style={{ background: 'none', fontSize: 16 }}>&times;</button>
+            </div>
+            <form onSubmit={handleCreateUserSubmit} style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Staff ID</label>
+                  <input
+                    type="text"
+                    value={newUser.staffId}
+                    onChange={e => setNewUser({ ...newUser, staffId: e.target.value })}
+                    placeholder="e.g. FAC103"
+                    style={{ width: '100%' }}
+                    required
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Role</label>
+                  <select
+                    value={newUser.role}
+                    onChange={e => setNewUser({ ...newUser, role: e.target.value })}
+                    style={{ width: '100%' }}>
+                    <option value="faculty">Faculty</option>
+                    <option value="staff">Staff</option>
+                    <option value="hod">HOD</option>
+                    <option value="storekeeper">Storekeeper</option>
+                    <option value="admin">Admin</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Full Name</label>
+                <input
+                  type="text"
+                  value={newUser.name}
+                  onChange={e => setNewUser({ ...newUser, name: e.target.value })}
+                  placeholder="e.g. Prof. Priya Sharma"
+                  style={{ width: '100%' }}
+                  required
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Department</label>
+                <input
+                  type="text"
+                  value={newUser.department}
+                  onChange={e => setNewUser({ ...newUser, department: e.target.value })}
+                  placeholder="e.g. Computer Science & Engineering"
+                  style={{ width: '100%' }}
+                  required
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Email</label>
+                  <input
+                    type="email"
+                    value={newUser.email}
+                    onChange={e => setNewUser({ ...newUser, email: e.target.value })}
+                    placeholder="priya.s@college.edu"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: 12, fontWeight: 600, display: 'block', marginBottom: 4 }}>Phone</label>
+                  <input
+                    type="tel"
+                    value={newUser.phone}
+                    onChange={e => setNewUser({ ...newUser, phone: e.target.value })}
+                    placeholder="+91 9876543230"
+                    style={{ width: '100%' }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ fontSize: 12, color: '#64748b', background: '#f8fafc', padding: 10, borderRadius: 6, border: '1px solid #e2e8f0' }}>
+                Default initial password will be set to: <code>Password@123</code> (must change on first login).
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+                <button type="button" onClick={() => setNewUserModal(false)} className="btn-secondary">Cancel</button>
+                <button type="submit" className="btn-primary">Create User</button>
               </div>
             </form>
           </div>

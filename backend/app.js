@@ -32,6 +32,7 @@ app.get('/api/health', (req, res) => {
 
 // Mount modular API routes
 app.use('/api/auth', authRoutes);
+app.use('/api', authRoutes); // Exposes /api/me and /api/me/devices per API spec
 app.use('/api/items', itemsRoutes);
 app.use('/api/stock', stockRoutes);
 app.use('/api/indents', indentsRoutes);

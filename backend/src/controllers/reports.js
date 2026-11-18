@@ -2,6 +2,7 @@ const { isConnected } = require('../config/db');
 const Item = require('../models/Item');
 const Indent = require('../models/Indent');
 const { mem } = require('../services/store');
+const { getStartOfMonth, getEndOfMonth } = require('../utils/dates');
 
 exports.getLowStock = async (req, res, next) => {
   try {
@@ -26,10 +27,25 @@ exports.getMonthlySummary = async (req, res, next) => {
     let indents = [];
 
     if (isConnected()) {
-      indents = await Indent.find({ status: 'ISSUED' })
+      const query = { status: 'ISSUED' };
+      if (month) {
+        query.createdAt = {
+          $gte: getStartOfMonth(month),
+          $lte: getEndOfMonth(month)
+        };
+      }
+      indents = await Indent.find(query)
         .populate('requester', 'name staffId department');
     } else {
-      indents = mem.indents.filter(i => i.status === 'ISSUED');
+      indents = mem.indents.filter(i => {
+        if (i.status !== 'ISSUED') return false;
+        if (month) {
+          const d = new Date(i.createdAt);
+          const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+          if (ym !== month) return false;
+        }
+        return true;
+      });
     }
 
     const byDepartment = {};

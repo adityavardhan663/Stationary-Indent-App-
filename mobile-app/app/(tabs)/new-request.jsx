@@ -1,9 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert, ActivityIndicator } from 'react-native';
+import { useRouter } from 'expo-router';
 import client from '../../src/api/client';
 import { authenticateBiometrics } from '../../src/biometrics/confirm';
 
 export default function NewRequestScreen() {
+  const router = useRouter();
   const [items, setItems] = useState([]);
   const [search, setSearch] = useState('');
   const [cart, setCart] = useState([]);
@@ -150,6 +152,13 @@ export default function NewRequestScreen() {
               <Text style={styles.submitBtnText}>Confirm with Fingerprint</Text>
             )}
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.reviewBtn}
+            onPress={() => router.push({ pathname: '/confirm', params: { items: JSON.stringify(cart), remarks } })}
+            disabled={submitting}>
+            <Text style={styles.reviewBtnText}>Review Summary Screen &rarr;</Text>
+          </TouchableOpacity>
         </View>
       )}
     </View>
@@ -173,5 +182,7 @@ const styles = StyleSheet.create({
   remarksInput: { backgroundColor: '#1e293b', color: '#fff', borderRadius: 6, padding: 10, fontSize: 13, marginBottom: 10 },
   submitBtn: { backgroundColor: '#16a34a', borderRadius: 10, padding: 14, alignItems: 'center' },
   submitBtnDisabled: { opacity: 0.7 },
-  submitBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' }
+  submitBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
+  reviewBtn: { marginTop: 8, padding: 10, alignItems: 'center' },
+  reviewBtnText: { color: '#38bdf8', fontSize: 13, fontWeight: '600' }
 });

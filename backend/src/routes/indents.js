@@ -4,7 +4,7 @@ const indentsController = require('../controllers/indents');
 const protect = require('../middleware/protect');
 const allow = require('../middleware/allow');
 
-router.post('/', protect, allow('faculty', 'hod', 'admin'), indentsController.createIndent);
+router.post('/', protect, allow('faculty', 'staff', 'hod', 'admin'), indentsController.createIndent);
 router.get('/mine', protect, indentsController.getMyIndents);
 router.get('/', protect, allow('storekeeper', 'admin', 'hod'), indentsController.getAllIndents);
 router.patch('/:id/issue', protect, allow('storekeeper', 'admin'), indentsController.issueIndent);
