@@ -11,6 +11,9 @@ export default function HomeScreen() {
 
   useEffect(() => {
     (async () => {
+      const token = await getSecureToken('authToken');
+      if (!token) return;
+
       const stored = await getSecureToken('userProfile');
       if (stored) {
         setUser(JSON.parse(stored));

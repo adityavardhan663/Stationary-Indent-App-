@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert, A
 import { useRouter } from 'expo-router';
 import client from '../../src/api/client';
 import { authenticateBiometrics } from '../../src/biometrics/confirm';
+import { getSecureToken } from '../../src/auth/storage';
 
 export default function NewRequestScreen() {
   const router = useRouter();
@@ -14,6 +15,9 @@ export default function NewRequestScreen() {
   const [remarks, setRemarks] = useState('');
 
   const fetchItems = async () => {
+    const token = await getSecureToken('authToken');
+    if (!token) return;
+
     setLoading(true);
     try {
       const res = await client.get('/items');
