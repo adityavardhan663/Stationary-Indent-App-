@@ -1,10 +1,13 @@
 
 import axios from 'axios';
 import { Platform } from 'react-native';
-import { getSecureToken } from '../auth/storage';
+import { router } from 'expo-router';
+import { getSecureToken, deleteSecureToken } from '../auth/storage';
 
-// Your laptop's IPv4 address
-export const LOCAL_DEV_IP = '172.15.13.66';
+// Your laptop's IP can be configured through EXPO_PUBLIC_DEV_IP.
+// The fallback is your previously configured laptop IP.
+export const LOCAL_DEV_IP =
+  process.env.EXPO_PUBLIC_DEV_IP || '172.15.13.66';
 
 // Backend API URL
 export const API_BASE_URL =
@@ -28,6 +31,41 @@ client.interceptors.request.use(
     return config;
   },
   (error) => {
+    return Promise.reject(error);
+  }
+);
+
+let isRedirectingToLogin = false;
+
+client.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response && error.response.status === 401) {
+      const url = error.config?.url || '';
+      const isLoginRequest = url.includes('/auth/login');
+
+      if (!isLoginRequest && !isRedirectingToLogin) {
+        isRedirectingToLogin = true;
+
+        try {
+          await deleteSecureToken('authToken');
+          await deleteSecureToken('userProfile');
+        } catch (e) {
+          // Ignore storage delete errors
+        }
+
+        try {
+          router.replace('/login');
+        } catch (e) {
+          // Ignore navigation errors
+        } finally {
+          setTimeout(() => {
+            isRedirectingToLogin = false;
+          }, 1000);
+        }
+      }
+    }
+
     return Promise.reject(error);
   }
 );
