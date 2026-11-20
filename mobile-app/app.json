@@ -3,6 +3,7 @@
     "name": "Stationery Indent",
     "slug": "stationery-indent",
     "version": "1.0.0",
+    "scheme": "stationeryindent",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",

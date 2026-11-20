@@ -1,12 +1,16 @@
 import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
 import client from '../../src/api/client';
+import { getSecureToken } from '../../src/auth/storage';
 
 export default function HistoryScreen() {
   const [indents, setIndents] = useState([]);
   const [loading, setLoading] = useState(false);
 
   const fetchHistory = async () => {
+    const token = await getSecureToken('authToken');
+    if (!token) return;
+
     setLoading(true);
     try {
       const res = await client.get('/indents/mine');
