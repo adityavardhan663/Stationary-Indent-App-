@@ -1,3 +1,4 @@
+require('dotenv').config();
 const request = require('supertest');
 const assert = require('assert');
 const test = require('node:test');
@@ -24,7 +25,28 @@ test('Stationery Indent Backend API - End-to-End Suite', async (t) => {
     assert.ok(res.body.data.token, 'Token must be returned');
     assert.strictEqual(res.body.data.user.staffId, 'FAC101');
     assert.strictEqual(res.body.data.user.role, 'faculty');
+    assert.strictEqual(res.body.data.user.passwordHash, undefined, 'passwordHash must not be exposed on login');
     facultyToken = res.body.data.token;
+  });
+
+  await t.test('2b. Authentication - Invalid Login Handling', async () => {
+    // Missing credentials
+    const missingRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'FAC101' });
+    assert.strictEqual(missingRes.statusCode, 400);
+
+    // Non-existent user
+    const noUserRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'NONEXISTENT', password: 'Password@123' });
+    assert.strictEqual(noUserRes.statusCode, 401);
+
+    // Wrong password
+    const wrongPassRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'FAC101', password: 'WrongPassword' });
+    assert.strictEqual(wrongPassRes.statusCode, 401);
   });
 
   await t.test('3. Authentication - Storekeeper Login', async () => {
@@ -120,7 +142,16 @@ test('Stationery Indent Backend API - End-to-End Suite', async (t) => {
 
     assert.strictEqual(meRes.statusCode, 200);
     assert.strictEqual(meRes.body.data.staffId, 'FAC101');
+    assert.strictEqual(meRes.body.data.passwordHash, undefined, 'passwordHash must never be returned');
 
+    // Missing deviceId -> 400
+    const invalidDevRes = await request(app)
+      .post('/api/me/devices')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ label: 'No Device ID' });
+    assert.strictEqual(invalidDevRes.statusCode, 400);
+
+    // Valid device registration
     const devRes = await request(app)
       .post('/api/me/devices')
       .set('Authorization', `Bearer ${facultyToken}`)
@@ -128,6 +159,59 @@ test('Stationery Indent Backend API - End-to-End Suite', async (t) => {
 
     assert.strictEqual(devRes.statusCode, 200);
     assert.ok(devRes.body.data.device);
+
+    // Duplicate device registration returns existing without duplication
+    const dupDevRes = await request(app)
+      .post('/api/me/devices')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ deviceId: 'dev-phone-new-test', label: 'Samsung Test Device' });
+
+    assert.strictEqual(dupDevRes.statusCode, 200);
+    assert.strictEqual(dupDevRes.body.data.message, 'Device already registered');
+  });
+
+  await t.test('9b. Authentication - Change Password Flow', async () => {
+    // Missing fields
+    const missingRes = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ oldPassword: 'Password@123' });
+    assert.strictEqual(missingRes.statusCode, 400);
+
+    // New password too short (< 8 chars)
+    const shortPassRes = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ oldPassword: 'Password@123', newPassword: '123' });
+    assert.strictEqual(shortPassRes.statusCode, 400);
+
+    // Wrong current password
+    const wrongCurrentRes = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ oldPassword: 'IncorrectPassword', newPassword: 'BrandNewPassword@2026' });
+    assert.strictEqual(wrongCurrentRes.statusCode, 400);
+
+    // Successful change
+    const successRes = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ oldPassword: 'Password@123', newPassword: 'BrandNewPassword@2026' });
+    assert.strictEqual(successRes.statusCode, 200);
+
+    // Verify login with new password
+    const newLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'FAC101', password: 'BrandNewPassword@2026' });
+    assert.strictEqual(newLoginRes.statusCode, 200);
+    assert.ok(newLoginRes.body.data.token);
+
+    // Reset password back to Password@123 for subsequent tests
+    const resetBackRes = await request(app)
+      .post('/api/auth/change-password')
+      .set('Authorization', `Bearer ${newLoginRes.body.data.token}`)
+      .send({ oldPassword: 'BrandNewPassword@2026', newPassword: 'Password@123' });
+    assert.strictEqual(resetBackRes.statusCode, 200);
   });
 
   await t.test('10. Reports - Monthly Summary with Month Filter', async () => {
@@ -223,5 +307,148 @@ test('Stationery Indent Backend API - End-to-End Suite', async (t) => {
 
     assert.strictEqual(res.statusCode, 200);
     assert.ok(res.text.includes('IndentNo,RequesterName,StaffID'));
+  });
+
+  await t.test('14. Authentication - Individual User Logins for All Roles', async () => {
+    // 14a: Admin Login
+    const adminRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'EMP001', password: 'Password@123' });
+    assert.strictEqual(adminRes.statusCode, 200);
+    assert.strictEqual(adminRes.body.data.user.role, 'admin');
+    assert.strictEqual(adminRes.body.data.user.staffId, 'EMP001');
+
+    // 14b: Storekeeper Login
+    const skRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'SK001', password: 'Password@123' });
+    assert.strictEqual(skRes.statusCode, 200);
+    assert.strictEqual(skRes.body.data.user.role, 'storekeeper');
+    assert.strictEqual(skRes.body.data.user.staffId, 'SK001');
+
+    // 14c: HOD Login
+    const hodRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'HOD01', password: 'Password@123' });
+    assert.strictEqual(hodRes.statusCode, 200);
+    assert.strictEqual(hodRes.body.data.user.role, 'hod');
+    assert.strictEqual(hodRes.body.data.user.staffId, 'HOD01');
+
+    // 14d: Faculty Login
+    const facRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'FAC101', password: 'Password@123' });
+    assert.strictEqual(facRes.statusCode, 200);
+    assert.strictEqual(facRes.body.data.user.role, 'faculty');
+    assert.strictEqual(facRes.body.data.user.staffId, 'FAC101');
+
+    // 14e: Second Faculty Login
+    const fac2Res = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'FAC102', password: 'Password@123' });
+    assert.strictEqual(fac2Res.statusCode, 200);
+    assert.strictEqual(fac2Res.body.data.user.role, 'faculty');
+    assert.strictEqual(fac2Res.body.data.user.staffId, 'FAC102');
+  });
+
+  await t.test('15. Authentication & Token Verification - /api/me', async () => {
+    // Unauthenticated request should fail with 401
+    const unauthRes = await request(app).get('/api/me');
+    assert.strictEqual(unauthRes.statusCode, 401);
+
+    // Request with invalid token should fail with 401
+    const badTokenRes = await request(app)
+      .get('/api/me')
+      .set('Authorization', 'Bearer invalid-token-xyz');
+    assert.strictEqual(badTokenRes.statusCode, 401);
+
+    // Request with valid faculty token returns user profile without passwordHash
+    const meRes = await request(app)
+      .get('/api/me')
+      .set('Authorization', `Bearer ${facultyToken}`);
+    assert.strictEqual(meRes.statusCode, 200);
+    assert.strictEqual(meRes.body.data.staffId, 'FAC101');
+    assert.strictEqual(meRes.body.data.passwordHash, undefined);
+  });
+
+  await t.test('16. Authorization Enforcement - Role Permission Boundaries', async () => {
+    // Faculty cannot access Admin users list (403 Forbidden)
+    const facUsersRes = await request(app)
+      .get('/api/users')
+      .set('Authorization', `Bearer ${facultyToken}`);
+    assert.strictEqual(facUsersRes.statusCode, 403);
+
+    // Faculty cannot issue indents (403 Forbidden)
+    const facIssueRes = await request(app)
+      .patch(`/api/indents/${createdIndentId}/issue`)
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ remarks: 'Unauthorized' });
+    assert.strictEqual(facIssueRes.statusCode, 403);
+
+    // Storekeeper cannot access Admin audit trail (403 Forbidden)
+    const skAuditRes = await request(app)
+      .get('/api/audit')
+      .set('Authorization', `Bearer ${storekeeperToken}`);
+    assert.strictEqual(skAuditRes.statusCode, 403);
+
+    // Storekeeper cannot access Admin users list (403 Forbidden)
+    const skUsersRes = await request(app)
+      .get('/api/users')
+      .set('Authorization', `Bearer ${storekeeperToken}`);
+    assert.strictEqual(skUsersRes.statusCode, 403);
+  });
+
+  await t.test('17. HOD Workflow - Department Indent Approval and Rejection', async () => {
+    // 17a: Log in as HOD
+    const hodLogin = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'HOD01', password: 'Password@123' });
+    const hodToken = hodLogin.body.data.token;
+
+    // 17b: Faculty submits a new indent for testing HOD approval
+    const newIndentRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        confirmation: { method: 'biometric', deviceId: 'dev-phone-aditya' },
+        remarks: 'HOD Approval Test Indent'
+      });
+    assert.strictEqual(newIndentRes.statusCode, 201);
+    const testHodIndentId = newIndentRes.body.data._id;
+
+    // 17c: HOD approves the indent
+    const approveRes = await request(app)
+      .patch(`/api/indents/${testHodIndentId}/approve`)
+      .set('Authorization', `Bearer ${hodToken}`);
+    assert.strictEqual(approveRes.statusCode, 200);
+    assert.strictEqual(approveRes.body.data.indent.status, 'APPROVED');
+
+    // 17d: Faculty submits another indent for testing HOD rejection
+    const rejectIndentRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        confirmation: { method: 'biometric', deviceId: 'dev-phone-aditya' },
+        remarks: 'HOD Rejection Test Indent'
+      });
+    assert.strictEqual(rejectIndentRes.statusCode, 201);
+    const testRejectIndentId = rejectIndentRes.body.data._id;
+
+    // 17e: HOD rejects the indent
+    const rejectRes = await request(app)
+      .patch(`/api/indents/${testRejectIndentId}/reject`)
+      .set('Authorization', `Bearer ${hodToken}`)
+      .send({ remarks: 'Budget limit exceeded for this quarter' });
+    assert.strictEqual(rejectRes.statusCode, 200);
+    assert.strictEqual(rejectRes.body.data.indent.status, 'REJECTED');
+
+    // 17f: Storekeeper cannot issue a REJECTED indent (400 Bad Request)
+    const issueRejectedRes = await request(app)
+      .patch(`/api/indents/${testRejectIndentId}/issue`)
+      .set('Authorization', `Bearer ${storekeeperToken}`)
+      .send({ remarks: 'Attempt to issue rejected' });
+    assert.strictEqual(issueRejectedRes.statusCode, 400);
   });
 });

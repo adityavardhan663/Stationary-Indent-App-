@@ -9,6 +9,7 @@ router.get('/mine', protect, indentsController.getMyIndents);
 router.get('/', protect, allow('storekeeper', 'admin', 'hod'), indentsController.getAllIndents);
 router.patch('/:id/issue', protect, allow('storekeeper', 'admin'), indentsController.issueIndent);
 router.patch('/:id/approve', protect, allow('hod', 'admin'), indentsController.approveIndent);
+router.patch('/:id/reject', protect, allow('hod', 'admin'), indentsController.rejectIndent);
 router.patch('/:id/cancel', protect, indentsController.cancelIndent);
 
 module.exports = router;

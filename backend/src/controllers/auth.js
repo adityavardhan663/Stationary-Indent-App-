@@ -5,7 +5,7 @@ const User = require('../models/User');
 const { mem } = require('../services/store');
 const { logAction } = require('../services/auditService');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'stationery_dev_secret_key_2026';
+const JWT_SECRET = process.env.JWT_SECRET;
 
 exports.login = async (req, res, next) => {
   try {
@@ -19,9 +19,12 @@ exports.login = async (req, res, next) => {
 
     if (isConnected()) {
       user = await User.findOne({ staffId: cleanStaffId });
-    }
-    if (!user) {
+    } else if (process.env.NODE_ENV !== 'production') {
       user = mem.users.find(u => u.staffId === cleanStaffId);
+    } else {
+      return res.status(500).json({
+        message: 'Database connection unavailable in production.'
+      });
     }
 
     if (!user || !user.active) {
@@ -36,21 +39,37 @@ exports.login = async (req, res, next) => {
     }
 
     // Auto-record device if provided
-    if (deviceId && user.devices && !user.devices.some(d => d.deviceId === deviceId)) {
-      user.devices.push({
-        deviceId,
-        label: req.body.deviceLabel || 'Mobile Phone',
-        approved: true, // auto-approve for convenience in prototype
-        registeredAt: new Date()
-      });
-      if (isConnected()) {
-        await User.findByIdAndUpdate(user._id, { devices: user.devices });
+    if (deviceId) {
+      const cleanDeviceId = String(deviceId).trim();
+      if (!Array.isArray(user.devices)) {
+        user.devices = [];
       }
+      const alreadyRegistered = user.devices.some(d => d.deviceId === cleanDeviceId);
+      if (!alreadyRegistered) {
+        const newDevice = {
+          deviceId: cleanDeviceId,
+          label: req.body.deviceLabel ? String(req.body.deviceLabel).trim() : 'Mobile Phone',
+          approved: true, // auto-approve for convenience in prototype
+          registeredAt: new Date()
+        };
+        user.devices.push(newDevice);
+
+        if (isConnected()) {
+          await User.findByIdAndUpdate(user._id, { devices: user.devices });
+        }
+      }
+    }
+
+    const secret = JWT_SECRET || process.env.JWT_SECRET;
+    if (!secret) {
+      return res.status(500).json({
+        message: 'Server authentication configuration error.'
+      });
     }
 
     const token = jwt.sign(
       { id: user._id, staffId: user.staffId, role: user.role },
-      JWT_SECRET,
+      secret,
       { expiresIn: '24h' }
     );
 
@@ -79,23 +98,31 @@ exports.login = async (req, res, next) => {
 
 exports.changePassword = async (req, res, next) => {
   try {
-    const { oldPassword, newPassword } = req.body;
-    if (!oldPassword || !newPassword) {
+    const currentPassword = req.body.oldPassword || req.body.currentPassword;
+    const { newPassword } = req.body;
+
+    if (!currentPassword || !newPassword) {
       return res.status(400).json({ message: 'Current password and new password are required' });
+    }
+
+    if (typeof newPassword !== 'string' || newPassword.length < 8) {
+      return res.status(400).json({ message: 'New password must be at least 8 characters long' });
     }
 
     let user = null;
     if (isConnected()) {
       user = await User.findById(req.user._id);
+    } else if (process.env.NODE_ENV !== 'production') {
+      user = mem.users.find(u => u._id === req.user._id || u.staffId === req.user.staffId);
     } else {
-      user = mem.users.find(u => u._id === req.user._id);
+      return res.status(500).json({ message: 'Database connection unavailable in production.' });
     }
 
     if (!user) {
       return res.status(404).json({ message: 'User not found' });
     }
 
-    const isMatch = await bcrypt.compare(oldPassword, user.passwordHash);
+    const isMatch = await bcrypt.compare(currentPassword, user.passwordHash);
     if (!isMatch) {
       return res.status(400).json({ message: 'Existing password does not match' });
     }
@@ -115,44 +142,75 @@ exports.changePassword = async (req, res, next) => {
   }
 };
 
-exports.getMe = async (req, res) => {
-  res.json({ data: req.user });
+exports.getMe = async (req, res, next) => {
+  try {
+    let user = null;
+    if (isConnected()) {
+      user = await User.findById(req.user._id).select('-passwordHash');
+    } else if (process.env.NODE_ENV !== 'production') {
+      user = mem.users.find(u => u._id === req.user._id || u.staffId === req.user.staffId);
+    } else {
+      return res.status(500).json({ message: 'Database connection unavailable in production.' });
+    }
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const userData = user.toObject ? user.toObject() : { ...user };
+    delete userData.passwordHash;
+
+    res.json({ data: userData });
+  } catch (err) {
+    next(err);
+  }
 };
 
 exports.registerDevice = async (req, res, next) => {
   try {
     const { deviceId, label } = req.body;
-    if (!deviceId) {
+    if (!deviceId || typeof deviceId !== 'string' || !deviceId.trim()) {
       return res.status(400).json({ message: 'deviceId is required' });
     }
+
+    const cleanDeviceId = String(deviceId).trim();
 
     let user = null;
     if (isConnected()) {
       user = await User.findById(req.user._id);
+    } else if (process.env.NODE_ENV !== 'production') {
+      user = mem.users.find(u => u._id === req.user._id || u.staffId === req.user.staffId);
     } else {
-      user = mem.users.find(u => u._id === req.user._id);
+      return res.status(500).json({ message: 'Database connection unavailable in production.' });
     }
 
-    const existing = user.devices?.find(d => d.deviceId === deviceId);
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    if (!Array.isArray(user.devices)) {
+      user.devices = [];
+    }
+
+    const existing = user.devices.find(d => d.deviceId === cleanDeviceId);
     if (existing) {
       return res.json({ data: { message: 'Device already registered', device: existing } });
     }
 
     const newDevice = {
-      deviceId,
-      label: label || 'Mobile Phone',
+      deviceId: cleanDeviceId,
+      label: label ? String(label).trim() : 'Mobile Phone',
       approved: true, // Auto-approved for prototype
       registeredAt: new Date()
     };
 
-    user.devices = user.devices || [];
     user.devices.push(newDevice);
 
     if (isConnected()) {
       await user.save();
     }
 
-    await logAction({ actorId: user._id, action: 'DEVICE_REGISTERED', details: { deviceId }, req });
+    await logAction({ actorId: user._id, action: 'DEVICE_REGISTERED', details: { deviceId: cleanDeviceId }, req });
 
     res.json({ data: { message: 'Device registered successfully', device: newDevice } });
   } catch (err) {
