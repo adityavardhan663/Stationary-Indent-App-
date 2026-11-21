@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator,
 import { useRouter } from 'expo-router';
 import client from '../src/api/client';
 import { saveSecureToken } from '../src/auth/storage';
+import { getInstallationDeviceId } from '../src/auth/deviceId';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -18,10 +19,11 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
+      const deviceId = await getInstallationDeviceId();
       const res = await client.post('/auth/login', {
         staffId: staffId.trim().toUpperCase(),
         password,
-        deviceId: 'dev-phone-' + staffId.toLowerCase()
+        deviceId
       });
 
       if (res.data?.data?.token) {

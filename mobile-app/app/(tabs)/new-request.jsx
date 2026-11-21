@@ -15,6 +15,7 @@ import { useRouter } from 'expo-router';
 import client from '../../src/api/client';
 import { authenticateBiometrics } from '../../src/biometrics/confirm';
 import { getSecureToken } from '../../src/auth/storage';
+import { getInstallationDeviceId } from '../../src/auth/deviceId';
 
 const NEEDED_WITHIN_CHIPS = [
   { label: '1 day', days: 1 },
@@ -143,22 +144,18 @@ export default function NewRequestScreen() {
       const authResult = await authenticateBiometrics('Touch fingerprint sensor to sign and submit your stationery requisition');
 
       if (!authResult.success) {
-        Alert.alert('Biometric Verification Failed', 'Authentication was cancelled or not verified.');
-        setSubmitting(false);
+        if (authResult.blocked) {
+          Alert.alert('Screen Lock Required', authResult.error);
+        } else if (authResult.cancelled) {
+          Alert.alert('Verification Cancelled', 'Requisition was not submitted. You can try again when ready.');
+        } else {
+          Alert.alert('Authentication Failed', authResult.error || 'Authentication could not be completed.');
+        }
         return;
       }
 
-      // Retrieve deviceId associated with user profile
-      let deviceId = 'dev-phone-app';
-      try {
-        const storedUser = await getSecureToken('userProfile');
-        if (storedUser) {
-          const u = JSON.parse(storedUser);
-          if (u?.staffId) {
-            deviceId = `dev-phone-${u.staffId.toLowerCase()}`;
-          }
-        }
-      } catch (e) {}
+      // Retrieve persistent installation deviceId
+      const deviceId = await getInstallationDeviceId();
 
       // Readable summary string for backward compatibility with existing storekeeper / HOD views
       const summaryParts = [
