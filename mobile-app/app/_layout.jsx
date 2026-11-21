@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
-import { View, ActivityIndicator, StyleSheet } from 'react-native';
-import { getSecureToken } from '../src/auth/storage';
+import { View, ActivityIndicator, StyleSheet, Alert } from 'react-native';
+import { getSecureToken, deleteSecureToken } from '../src/auth/storage';
 
 export default function RootLayout() {
   const [loading, setLoading] = useState(true);
@@ -14,7 +14,28 @@ export default function RootLayout() {
     async function checkAuth() {
       try {
         const token = await getSecureToken('authToken');
+        const userProfileStr = await getSecureToken('userProfile');
         if (!isMounted) return;
+
+        let userRole = null;
+        if (userProfileStr) {
+          try {
+            const parsed = JSON.parse(userProfileStr);
+            userRole = parsed?.role?.toLowerCase();
+          } catch (e) {}
+        }
+
+        // Storekeepers must use web dashboard only
+        if (token && userRole === 'storekeeper') {
+          await deleteSecureToken('authToken');
+          await deleteSecureToken('userProfile');
+          Alert.alert(
+            'Access Restricted',
+            'Storekeepers must use the web dashboard. Please access the portal from the counter computer.'
+          );
+          router.replace('/login');
+          return;
+        }
 
         const inAuthGroup = segments[0] === 'login';
 

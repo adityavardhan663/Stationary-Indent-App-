@@ -25,8 +25,17 @@ export default function LoginScreen() {
       });
 
       if (res.data?.data?.token) {
+        const user = res.data.data.user;
+        if (user?.role === 'storekeeper') {
+          Alert.alert(
+            'Access Restricted',
+            'Storekeepers must use the web dashboard. Please access the stationery store portal on your counter computer.'
+          );
+          return;
+        }
+
         await saveSecureToken('authToken', res.data.data.token);
-        await saveSecureToken('userProfile', JSON.stringify(res.data.data.user));
+        await saveSecureToken('userProfile', JSON.stringify(user));
         router.replace('/(tabs)');
       } else {
         Alert.alert('Login Failed', 'Invalid credentials');
