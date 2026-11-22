@@ -3,6 +3,7 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator,
 import { useRouter } from 'expo-router';
 import client from '../src/api/client';
 import { saveSecureToken } from '../src/auth/storage';
+import { getInstallationDeviceId } from '../src/auth/deviceId';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -18,15 +19,25 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
+      const deviceId = await getInstallationDeviceId();
       const res = await client.post('/auth/login', {
         staffId: staffId.trim().toUpperCase(),
         password,
-        deviceId: 'dev-phone-' + staffId.toLowerCase()
+        deviceId
       });
 
       if (res.data?.data?.token) {
+        const user = res.data.data.user;
+        if (user?.role === 'storekeeper') {
+          Alert.alert(
+            'Access Restricted',
+            'Storekeepers must use the web dashboard. Please access the stationery store portal on your counter computer.'
+          );
+          return;
+        }
+
         await saveSecureToken('authToken', res.data.data.token);
-        await saveSecureToken('userProfile', JSON.stringify(res.data.data.user));
+        await saveSecureToken('userProfile', JSON.stringify(user));
         router.replace('/(tabs)');
       } else {
         Alert.alert('Login Failed', 'Invalid credentials');

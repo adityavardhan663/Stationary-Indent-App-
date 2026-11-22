@@ -380,3 +380,37 @@ exports.approveIndent = async (req, res, next) => {
     next(err);
   }
 };
+
+exports.rejectIndent = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    let indent = null;
+
+    if (isConnected()) {
+      indent = await Indent.findById(id);
+    } else {
+      indent = mem.indents.find(i => i._id === id || i.indentNo === id);
+    }
+
+    if (!indent) return res.status(404).json({ message: 'Indent not found' });
+    if (indent.status !== 'REQUESTED') {
+      return res.status(400).json({ message: `Cannot reject indent with status ${indent.status}` });
+    }
+
+    indent.status = 'REJECTED';
+    indent.remarks = req.body?.remarks || indent.remarks || 'Rejected by Department Head';
+
+    if (isConnected()) await indent.save();
+
+    await logAction({
+      actorId: req.user._id,
+      action: 'INDENT_REJECT',
+      details: { indentNo: indent.indentNo, rejectedBy: req.user.staffId, remarks: indent.remarks },
+      req
+    });
+
+    res.json({ data: { message: `Indent ${indent.indentNo} rejected`, indent } });
+  } catch (err) {
+    next(err);
+  }
+};

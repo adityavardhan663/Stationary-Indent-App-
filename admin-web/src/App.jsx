@@ -16,21 +16,22 @@ import {
   RefreshCw,
   LogOut,
   Fingerprint,
-  Printer
+  Printer,
+  XCircle,
+  Check,
+  Loader2,
+  Building2
 } from 'lucide-react';
+import LoginPage from './components/LoginPage';
 
 export default function App() {
-  const [currentUser, setCurrentUser] = useState({
-    staffId: 'SK001',
-    name: 'Rajesh Kumar',
-    role: 'storekeeper',
-    department: 'Central Stores',
-    token: 'demo-token'
-  });
+  const [authChecked, setAuthChecked] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [activeTab, setActiveTab] = useState('dashboard');
 
-  const [activeTab, setActiveTab] = useState('queue'); // 'dashboard', 'queue', 'items', 'stockin', 'history', 'reports', 'users', 'audit', 'mobile-sim'
   const [items, setItems] = useState([]);
   const [indents, setIndents] = useState([]);
+  const [myIndents, setMyIndents] = useState([]);
   const [lowStock, setLowStock] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [usersList, setUsersList] = useState([]);
@@ -46,7 +47,7 @@ export default function App() {
   const [searchFilter, setSearchFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
 
-  // Mobile Simulator state (for testing faculty flow right inside the browser!)
+  // Mobile Simulator state (for testing faculty flow right inside the browser)
   const [mobileCart, setMobileCart] = useState([]);
   const [mobileRemarks, setMobileRemarks] = useState('');
   const [mobileSuccessIndent, setMobileSuccessIndent] = useState(null);
@@ -56,117 +57,277 @@ export default function App() {
 
   const showNotification = (msg, type = 'success') => {
     setFeedback({ msg, type });
-    setTimeout(() => setFeedback(null), 4000);
+    setTimeout(() => setFeedback(null), 4500);
   };
 
-  const getAuthHeaders = () => ({
-    'Content-Type': 'application/json',
-    'Authorization': `Bearer ${currentUser.token}`
-  });
+  const getAuthHeaders = () => {
+    if (!currentUser?.token) return { 'Content-Type': 'application/json' };
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': `Bearer ${currentUser.token}`
+    };
+  };
 
-  // Login handler
-  const handleQuickLogin = async (staffId) => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_BASE}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ staffId, password: 'Password@123' })
-      });
-      const json = await res.json();
-      if (res.ok && json.data) {
-        setCurrentUser({ ...json.data.user, token: json.data.token });
-        showNotification(`Logged in as ${json.data.user.name} (${json.data.user.role.toUpperCase()})`);
-      } else {
-        showNotification(json.message || 'Login failed', 'error');
-      }
-    } catch (err) {
-      showNotification('Network error connecting to backend: ' + err.message, 'error');
-    } finally {
-      setLoading(false);
+  // Helper to determine allowed tabs per role
+  const getAllowedTabIds = (role) => {
+    const r = (role || '').toLowerCase();
+    if (r === 'admin') {
+      return ['dashboard', 'queue', 'items', 'stockin', 'history', 'reports', 'users', 'audit', 'mobile-sim'];
     }
+    if (r === 'storekeeper') {
+      return ['queue', 'dashboard', 'items', 'stockin', 'history', 'reports'];
+    }
+    if (r === 'hod') {
+      return ['hod-approvals', 'history', 'items', 'mobile-sim'];
+    }
+    // faculty / staff
+    return ['mobile-sim', 'my-indents', 'items'];
   };
 
-  // Fetch initial data
+  const getDefaultTabId = (role) => {
+    const r = (role || '').toLowerCase();
+    if (r === 'admin') return 'dashboard';
+    if (r === 'storekeeper') return 'queue';
+    if (r === 'hod') return 'hod-approvals';
+    return 'mobile-sim';
+  };
+
+  // Check stored credentials on mount
+  useEffect(() => {
+    const verifyStoredSession = async () => {
+      const storedToken = localStorage.getItem('stationery_token');
+      if (!storedToken) {
+        setAuthChecked(true);
+        return;
+      }
+
+      try {
+        const res = await fetch(`${API_BASE}/me`, {
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${storedToken}`
+          }
+        });
+
+        if (res.ok) {
+          const json = await res.json();
+          if (json.data) {
+            const user = { ...json.data, token: storedToken };
+            setCurrentUser(user);
+            setActiveTab(getDefaultTabId(user.role));
+          } else {
+            handleLogout();
+          }
+        } else {
+          // Token expired or invalid
+          handleLogout();
+        }
+      } catch (err) {
+        console.warn('Session verification error:', err.message);
+        handleLogout();
+      } finally {
+        setAuthChecked(true);
+      }
+    };
+
+    verifyStoredSession();
+  }, []);
+
+  // Login handler triggered by LoginPage
+  const handleLoginSuccess = ({ token, user }) => {
+    const userSession = { ...user, token };
+    localStorage.setItem('stationery_token', token);
+    localStorage.setItem('stationery_user', JSON.stringify(user));
+    setCurrentUser(userSession);
+    setActiveTab(getDefaultTabId(user.role));
+    showNotification(`Welcome, ${user.name} (${user.role.toUpperCase()})`);
+  };
+
+  // Logout handler
+  const handleLogout = () => {
+    localStorage.removeItem('stationery_token');
+    localStorage.removeItem('stationery_user');
+    setCurrentUser(null);
+    setItems([]);
+    setIndents([]);
+    setMyIndents([]);
+    setLowStock([]);
+    setAuditLogs([]);
+    setUsersList([]);
+    setMobileCart([]);
+    setMobileSuccessIndent(null);
+    setActiveTab('dashboard');
+  };
+
+  // Safe fetch wrapper that handles 401 unauthenticated responses
+  const authFetch = async (url, options = {}) => {
+    const headers = { ...getAuthHeaders(), ...(options.headers || {}) };
+    const res = await fetch(url, { ...options, headers });
+    if (res.status === 401) {
+      handleLogout();
+      showNotification('Session expired. Please log in again.', 'error');
+      throw new Error('Unauthorized');
+    }
+    return res;
+  };
+
+  // Fetch data according to authenticated user role
   const fetchData = async () => {
+    if (!currentUser?.token) return;
     setLoading(true);
+
     try {
-      // Fetch items
-      const itemsRes = await fetch(`${API_BASE}/items`, { headers: getAuthHeaders() });
+      const userRole = (currentUser.role || '').toLowerCase();
+
+      // 1. Fetch stationery items (all authenticated users can view the catalog)
+      const itemsRes = await authFetch(`${API_BASE}/items`);
       if (itemsRes.ok) {
         const data = await itemsRes.json();
         setItems(data.data || []);
       }
 
-      // Fetch indents
-      const indentsRes = await fetch(`${API_BASE}/indents`, { headers: getAuthHeaders() });
-      if (indentsRes.ok) {
-        const data = await indentsRes.json();
-        setIndents(data.data || []);
+      // 2. Fetch indents based on role permissions
+      if (['storekeeper', 'admin', 'hod'].includes(userRole)) {
+        const indentsRes = await authFetch(`${API_BASE}/indents`);
+        if (indentsRes.ok) {
+          const data = await indentsRes.json();
+          setIndents(data.data || []);
+        }
       }
 
-      // Fetch low stock
-      const lowStockRes = await fetch(`${API_BASE}/reports/low-stock`, { headers: getAuthHeaders() });
-      if (lowStockRes.ok) {
-        const data = await lowStockRes.json();
-        setLowStock(data.data || []);
+      // Fetch user's own indents for faculty, staff, and HOD
+      if (['faculty', 'staff', 'hod'].includes(userRole)) {
+        const myIndentsRes = await authFetch(`${API_BASE}/indents/mine`);
+        if (myIndentsRes.ok) {
+          const data = await myIndentsRes.json();
+          setMyIndents(data.data || []);
+        }
       }
 
-      // Fetch audit logs if admin
-      if (currentUser.role === 'admin') {
-        const auditRes = await fetch(`${API_BASE}/audit`, { headers: getAuthHeaders() });
+      // 3. Fetch low stock & reports (Storekeeper and Admin only)
+      if (['storekeeper', 'admin'].includes(userRole)) {
+        const lowStockRes = await authFetch(`${API_BASE}/reports/low-stock`);
+        if (lowStockRes.ok) {
+          const data = await lowStockRes.json();
+          setLowStock(data.data || []);
+        }
+      }
+
+      // 4. Fetch audit logs and users list (Admin only)
+      if (userRole === 'admin') {
+        const auditRes = await authFetch(`${API_BASE}/audit`);
         if (auditRes.ok) {
           const data = await auditRes.json();
           setAuditLogs(data.data || []);
         }
 
-        const usersRes = await fetch(`${API_BASE}/users`, { headers: getAuthHeaders() });
+        const usersRes = await authFetch(`${API_BASE}/users`);
         if (usersRes.ok) {
           const data = await usersRes.json();
           setUsersList(data.data || []);
         }
       }
     } catch (err) {
-      console.warn('Backend sync error:', err.message);
+      if (err.message !== 'Unauthorized') {
+        console.warn('Backend sync warning:', err.message);
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  useEffect(() => {
-    handleQuickLogin('SK001');
-  }, []);
-
+  // Sync data whenever currentUser changes
   useEffect(() => {
     if (currentUser?.token) {
       fetchData();
     }
   }, [currentUser]);
 
-  // Issue Indent action (Atomic stock decrement on backend)
+  // Ensure activeTab is valid for currentUser role
+  useEffect(() => {
+    if (currentUser?.role) {
+      const allowed = getAllowedTabIds(currentUser.role);
+      if (!allowed.includes(activeTab)) {
+        setActiveTab(getDefaultTabId(currentUser.role));
+      }
+    }
+  }, [currentUser, activeTab]);
+
+  // Issue Indent action (Storekeeper / Admin)
   const handleIssueIndent = async (indentId, indentNo) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/indents/${indentId}/issue`, {
+      const res = await authFetch(`${API_BASE}/indents/${indentId}/issue`, {
         method: 'PATCH',
-        headers: getAuthHeaders(),
         body: JSON.stringify({ remarks: 'Issued at Central Stationery Counter' })
       });
       const json = await res.json();
       if (res.ok) {
-        showNotification(`Indent ${indentNo} issued successfully. Stock updated automatically!`);
+        showNotification(`Indent ${indentNo} issued successfully. Stock updated!`);
         fetchData();
       } else {
         showNotification(json.message || 'Issue failed', 'error');
       }
     } catch (err) {
-      showNotification('Error issuing indent: ' + err.message, 'error');
+      if (err.message !== 'Unauthorized') {
+        showNotification('Error issuing indent: ' + err.message, 'error');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Stock-In action
+  // HOD Approve Indent action
+  const handleApproveIndent = async (indentId, indentNo) => {
+    setLoading(true);
+    try {
+      const res = await authFetch(`${API_BASE}/indents/${indentId}/approve`, {
+        method: 'PATCH'
+      });
+      const json = await res.json();
+      if (res.ok) {
+        showNotification(`Indent ${indentNo} approved by Department Head.`);
+        fetchData();
+      } else {
+        showNotification(json.message || 'Approval failed', 'error');
+      }
+    } catch (err) {
+      if (err.message !== 'Unauthorized') {
+        showNotification('Error approving indent: ' + err.message, 'error');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // HOD Reject Indent action
+  const handleRejectIndent = async (indentId, indentNo) => {
+    const remarks = window.prompt(`Please provide a reason for rejecting indent ${indentNo}:`, 'Quota exceeded or item unavailable for this semester');
+    if (remarks === null) return; // User cancelled
+
+    setLoading(true);
+    try {
+      const res = await authFetch(`${API_BASE}/indents/${indentId}/reject`, {
+        method: 'PATCH',
+        body: JSON.stringify({ remarks })
+      });
+      const json = await res.json();
+      if (res.ok) {
+        showNotification(`Indent ${indentNo} has been rejected.`, 'error');
+        fetchData();
+      } else {
+        showNotification(json.message || 'Rejection failed', 'error');
+      }
+    } catch (err) {
+      if (err.message !== 'Unauthorized') {
+        showNotification('Error rejecting indent: ' + err.message, 'error');
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Stock-In action (Storekeeper / Admin)
   const handleStockInSubmit = async (e) => {
     e.preventDefault();
     if (!stockInForm.itemId) {
@@ -175,9 +336,8 @@ export default function App() {
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/stock/in`, {
+      const res = await authFetch(`${API_BASE}/stock/in`, {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify(stockInForm)
       });
       const json = await res.json();
@@ -190,20 +350,21 @@ export default function App() {
         showNotification(json.message || 'Stock-in failed', 'error');
       }
     } catch (err) {
-      showNotification('Stock-in error: ' + err.message, 'error');
+      if (err.message !== 'Unauthorized') {
+        showNotification('Stock-in error: ' + err.message, 'error');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Add Item action
+  // Add Item action (Storekeeper / Admin)
   const handleCreateItemSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/items`, {
+      const res = await authFetch(`${API_BASE}/items`, {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify(newItem)
       });
       const json = await res.json();
@@ -216,7 +377,9 @@ export default function App() {
         showNotification(json.message || 'Could not create item', 'error');
       }
     } catch (err) {
-      showNotification('Item creation error: ' + err.message, 'error');
+      if (err.message !== 'Unauthorized') {
+        showNotification('Item creation error: ' + err.message, 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -226,9 +389,7 @@ export default function App() {
   const handleDownloadCsv = async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/reports/export.csv`, {
-        headers: getAuthHeaders()
-      });
+      const res = await authFetch(`${API_BASE}/reports/export.csv`);
       if (!res.ok) {
         showNotification('Failed to download CSV report', 'error');
         return;
@@ -244,7 +405,9 @@ export default function App() {
       window.URL.revokeObjectURL(url);
       showNotification('Indent register exported to CSV');
     } catch (err) {
-      showNotification('Export error: ' + err.message, 'error');
+      if (err.message !== 'Unauthorized') {
+        showNotification('Export error: ' + err.message, 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -254,9 +417,8 @@ export default function App() {
   const handleToggleDeviceApproval = async (userId, deviceId, currentStatus) => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/users/${userId}/devices/${deviceId}`, {
+      const res = await authFetch(`${API_BASE}/users/${userId}/devices/${deviceId}`, {
         method: 'PATCH',
-        headers: getAuthHeaders(),
         body: JSON.stringify({ approved: !currentStatus })
       });
       const json = await res.json();
@@ -267,7 +429,9 @@ export default function App() {
         showNotification(json.message || 'Device approval failed', 'error');
       }
     } catch (err) {
-      showNotification('Error updating device: ' + err.message, 'error');
+      if (err.message !== 'Unauthorized') {
+        showNotification('Error updating device: ' + err.message, 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -278,9 +442,8 @@ export default function App() {
     if (!window.confirm(`Reset password for ${userName} to default ('Password@123')?`)) return;
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/users/${userId}/reset-password`, {
+      const res = await authFetch(`${API_BASE}/users/${userId}/reset-password`, {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify({ tempPassword: 'Password@123' })
       });
       const json = await res.json();
@@ -290,7 +453,9 @@ export default function App() {
         showNotification(json.message || 'Password reset failed', 'error');
       }
     } catch (err) {
-      showNotification('Error resetting password: ' + err.message, 'error');
+      if (err.message !== 'Unauthorized') {
+        showNotification('Error resetting password: ' + err.message, 'error');
+      }
     } finally {
       setLoading(false);
     }
@@ -301,9 +466,8 @@ export default function App() {
     e.preventDefault();
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/users`, {
+      const res = await authFetch(`${API_BASE}/users`, {
         method: 'POST',
-        headers: getAuthHeaders(),
         body: JSON.stringify(newUser)
       });
       const json = await res.json();
@@ -316,13 +480,15 @@ export default function App() {
         showNotification(json.message || 'Could not create user', 'error');
       }
     } catch (err) {
-      showNotification('User creation error: ' + err.message, 'error');
+      if (err.message !== 'Unauthorized') {
+        showNotification('User creation error: ' + err.message, 'error');
+      }
     } finally {
       setLoading(false);
     }
   };
 
-  // Mobile App Simulation submit
+  // Mobile App Simulation submit (works for any authenticated user)
   const handleMobileSubmitIndent = async () => {
     if (mobileCart.length === 0) {
       showNotification('Select at least one item first', 'error');
@@ -330,21 +496,19 @@ export default function App() {
     }
 
     setBiometricScanning(true);
-    // Simulate fingerprint touch delay
     setTimeout(async () => {
       try {
         const payload = {
           items: mobileCart.map(c => ({ itemId: c.itemId, quantity: c.qty })),
           confirmation: {
             method: 'biometric',
-            deviceId: 'dev-phone-aditya'
+            deviceId: currentUser?.devices?.[0]?.deviceId || 'dev-phone-' + (currentUser?.staffId || 'user').toLowerCase()
           },
-          remarks: mobileRemarks || 'Department office supply request'
+          remarks: mobileRemarks || `${currentUser?.department || 'Department'} requisition request`
         };
 
-        const res = await fetch(`${API_BASE}/indents`, {
+        const res = await authFetch(`${API_BASE}/indents`, {
           method: 'POST',
-          headers: getAuthHeaders(),
           body: JSON.stringify(payload)
         });
         const json = await res.json();
@@ -357,15 +521,45 @@ export default function App() {
           showNotification(json.message || 'Failed to submit indent', 'error');
         }
       } catch (err) {
-        showNotification('Submission error: ' + err.message, 'error');
+        if (err.message !== 'Unauthorized') {
+          showNotification('Submission error: ' + err.message, 'error');
+        }
       } finally {
         setBiometricScanning(false);
       }
     }, 1200);
   };
 
-  const pendingIndents = indents.filter(i => i.status === 'REQUESTED');
-  const filteredIndents = indents.filter(i => {
+  // If session is still being checked from localStorage, show spinner
+  if (!authChecked) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', background: '#0f172a', color: '#f8fafc' }}>
+        <Loader2 size={40} className="animate-spin" color="#38bdf8" />
+        <div style={{ marginTop: 16, fontSize: 15, fontWeight: 500, color: '#94a3b8' }}>
+          Initializing Stationery Indent System...
+        </div>
+      </div>
+    );
+  }
+
+  // If user is not authenticated, render dedicated Login Page
+  if (!currentUser) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  }
+
+  // Computed state
+  const role = (currentUser.role || '').toLowerCase();
+  const allowedTabs = getAllowedTabIds(role);
+
+  // Storekeeper counter queue: indents requested or approved waiting to be issued
+  const pendingCounterIndents = indents.filter(i => i.status === 'REQUESTED' || i.status === 'APPROVED');
+
+  // HOD approvals: indents in HOD's department with status 'REQUESTED'
+  const hodPendingIndents = indents.filter(i => i.status === 'REQUESTED');
+
+  // Indents to display in Requisition History
+  const displayIndents = role === 'faculty' || role === 'staff' ? myIndents : indents;
+  const filteredIndents = displayIndents.filter(i => {
     if (statusFilter !== 'ALL' && i.status !== statusFilter) return false;
     if (searchFilter && !i.indentNo.toLowerCase().includes(searchFilter.toLowerCase())) return false;
     return true;
@@ -377,92 +571,148 @@ export default function App() {
       <aside className="sidebar">
         <div className="sidebar-header">
           <div className="sidebar-title">Stationery Indent</div>
-          <div className="sidebar-subtitle">Counter & Admin Suite</div>
+          <div className="sidebar-subtitle">Institutional Management System</div>
         </div>
 
         <ul className="nav-links">
-          <li className={`nav-item ${activeTab === 'queue' ? 'active' : ''}`} onClick={() => setActiveTab('queue')}>
-            <ClipboardList size={18} />
-            <span>Issue Queue</span>
-            {pendingIndents.length > 0 && (
-              <span style={{ marginLeft: 'auto', background: '#ef4444', color: '#fff', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
-                {pendingIndents.length}
-              </span>
-            )}
-          </li>
+          {/* Issue Queue: Storekeeper, Admin */}
+          {allowedTabs.includes('queue') && (
+            <li className={`nav-item ${activeTab === 'queue' ? 'active' : ''}`} onClick={() => setActiveTab('queue')}>
+              <ClipboardList size={18} />
+              <span>Issue Queue</span>
+              {pendingCounterIndents.length > 0 && (
+                <span style={{ marginLeft: 'auto', background: '#ef4444', color: '#fff', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
+                  {pendingCounterIndents.length}
+                </span>
+              )}
+            </li>
+          )}
 
-          <li className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
-            <TrendingUp size={18} />
-            <span>Store Summary</span>
-          </li>
+          {/* HOD Approvals: HOD */}
+          {allowedTabs.includes('hod-approvals') && (
+            <li className={`nav-item ${activeTab === 'hod-approvals' ? 'active' : ''}`} onClick={() => setActiveTab('hod-approvals')}>
+              <ShieldCheck size={18} />
+              <span>Dept. Approvals</span>
+              {hodPendingIndents.length > 0 && (
+                <span style={{ marginLeft: 'auto', background: '#d97706', color: '#fff', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
+                  {hodPendingIndents.length}
+                </span>
+              )}
+            </li>
+          )}
 
-          <li className={`nav-item ${activeTab === 'items' ? 'active' : ''}`} onClick={() => setActiveTab('items')}>
-            <Package size={18} />
-            <span>Item Inventory</span>
-          </li>
+          {/* Store Summary: Storekeeper, Admin */}
+          {allowedTabs.includes('dashboard') && (
+            <li className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
+              <TrendingUp size={18} />
+              <span>Store Summary</span>
+            </li>
+          )}
 
-          <li className={`nav-item ${activeTab === 'stockin' ? 'active' : ''}`} onClick={() => setActiveTab('stockin')}>
-            <Plus size={18} />
-            <span>Stock-In (Receive)</span>
-          </li>
+          {/* Item Inventory / Catalog: All roles */}
+          {allowedTabs.includes('items') && (
+            <li className={`nav-item ${activeTab === 'items' ? 'active' : ''}`} onClick={() => setActiveTab('items')}>
+              <Package size={18} />
+              <span>{['storekeeper', 'admin'].includes(role) ? 'Item Inventory' : 'Stationery Catalog'}</span>
+            </li>
+          )}
 
-          <li className={`nav-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
-            <FileText size={18} />
-            <span>Requisition History</span>
-          </li>
+          {/* Stock-In: Storekeeper, Admin */}
+          {allowedTabs.includes('stockin') && (
+            <li className={`nav-item ${activeTab === 'stockin' ? 'active' : ''}`} onClick={() => setActiveTab('stockin')}>
+              <Plus size={18} />
+              <span>Stock-In (Receive)</span>
+            </li>
+          )}
 
-          <li className={`nav-item ${activeTab === 'reports' ? 'active' : ''}`} onClick={() => setActiveTab('reports')}>
-            <AlertTriangle size={18} />
-            <span>Low Stock & Reports</span>
-            {lowStock.length > 0 && (
-              <span style={{ marginLeft: 'auto', background: '#f59e0b', color: '#000', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
-                {lowStock.length}
-              </span>
-            )}
-          </li>
+          {/* Requisition History: Storekeeper, Admin, HOD */}
+          {allowedTabs.includes('history') && (
+            <li className={`nav-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
+              <FileText size={18} />
+              <span>{role === 'hod' ? 'Dept. Requisitions' : 'Requisition History'}</span>
+            </li>
+          )}
 
-          {currentUser.role === 'admin' && (
+          {/* My Requisitions: Faculty / Staff */}
+          {allowedTabs.includes('my-indents') && (
+            <li className={`nav-item ${activeTab === 'my-indents' ? 'active' : ''}`} onClick={() => setActiveTab('my-indents')}>
+              <FileText size={18} />
+              <span>My Requisitions</span>
+            </li>
+          )}
+
+          {/* Low Stock & Reports: Storekeeper, Admin */}
+          {allowedTabs.includes('reports') && (
+            <li className={`nav-item ${activeTab === 'reports' ? 'active' : ''}`} onClick={() => setActiveTab('reports')}>
+              <AlertTriangle size={18} />
+              <span>Low Stock & Reports</span>
+              {lowStock.length > 0 && (
+                <span style={{ marginLeft: 'auto', background: '#f59e0b', color: '#000', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
+                  {lowStock.length}
+                </span>
+              )}
+            </li>
+          )}
+
+          {/* Staff & Devices: Admin only */}
+          {allowedTabs.includes('users') && (
+            <li className={`nav-item ${activeTab === 'users' ? 'active' : ''}`} onClick={() => setActiveTab('users')}>
+              <Users size={18} />
+              <span>Staff & Devices</span>
+            </li>
+          )}
+
+          {/* Audit Trail: Admin only */}
+          {allowedTabs.includes('audit') && (
+            <li className={`nav-item ${activeTab === 'audit' ? 'active' : ''}`} onClick={() => setActiveTab('audit')}>
+              <ShieldCheck size={18} />
+              <span>Audit Trail</span>
+            </li>
+          )}
+
+          {/* Phone App Simulator: Admin, HOD, Faculty, Staff */}
+          {allowedTabs.includes('mobile-sim') && (
             <>
-              <li className={`nav-item ${activeTab === 'users' ? 'active' : ''}`} onClick={() => setActiveTab('users')}>
-                <Users size={18} />
-                <span>Staff & Devices</span>
-              </li>
-              <li className={`nav-item ${activeTab === 'audit' ? 'active' : ''}`} onClick={() => setActiveTab('audit')}>
-                <ShieldCheck size={18} />
-                <span>Audit Trail</span>
+              <div style={{ height: 1, background: '#1e293b', margin: '16px 0' }} />
+              <li
+                className={`nav-item ${activeTab === 'mobile-sim' ? 'active' : ''}`}
+                onClick={() => setActiveTab('mobile-sim')}
+                style={{ border: '1px dashed #38bdf8' }}
+              >
+                <Smartphone size={18} color="#38bdf8" />
+                <span style={{ color: '#38bdf8' }}>
+                  {role === 'admin' ? 'Phone App Simulator' : 'Submit Requisition'}
+                </span>
               </li>
             </>
           )}
-
-          <div style={{ height: 1, background: '#1e293b', margin: '16px 0' }} />
-
-          <li className={`nav-item ${activeTab === 'mobile-sim' ? 'active' : ''}`} onClick={() => setActiveTab('mobile-sim')} style={{ border: '1px dashed #38bdf8' }}>
-            <Smartphone size={18} color="#38bdf8" />
-            <span style={{ color: '#38bdf8' }}>Phone App Simulator</span>
-          </li>
         </ul>
 
-        {/* User Badge in Sidebar */}
-        <div style={{ padding: 16, borderTop: '1px solid #1e293b', background: '#020617' }}>
-          <div style={{ fontSize: 13, fontWeight: 600 }}>{currentUser.name}</div>
-          <div style={{ fontSize: 11, color: '#94a3b8' }}>{currentUser.department} &bull; <strong style={{ color: '#38bdf8' }}>{currentUser.role.toUpperCase()}</strong></div>
-          <div style={{ display: 'flex', gap: 6, marginTop: 10 }}>
-            <button
-              onClick={() => handleQuickLogin('SK001')}
-              style={{ fontSize: 11, padding: '4px 8px', background: currentUser.role === 'storekeeper' ? '#1d4ed8' : '#334155', color: '#fff' }}>
-              Storekeeper
-            </button>
-            <button
-              onClick={() => handleQuickLogin('EMP001')}
-              style={{ fontSize: 11, padding: '4px 8px', background: currentUser.role === 'admin' ? '#1d4ed8' : '#334155', color: '#fff' }}>
-              Admin
-            </button>
-            <button
-              onClick={() => handleQuickLogin('FAC101')}
-              style={{ fontSize: 11, padding: '4px 8px', background: currentUser.role === 'faculty' ? '#1d4ed8' : '#334155', color: '#fff' }}>
-              Faculty
-            </button>
+        {/* User Identity & Logout Section (No demo role switching) */}
+        <div className="user-profile-badge">
+          <div className="user-info">
+            <div className="user-name">{currentUser.name}</div>
+            <div className="user-meta">
+              <span>{currentUser.department}</span>
+              <span>&bull;</span>
+              <span>ID: {currentUser.staffId}</span>
+            </div>
+            <div style={{ marginTop: 6 }}>
+              <span className={`user-role-badge role-${role}`}>
+                {currentUser.role.toUpperCase()}
+              </span>
+            </div>
           </div>
+
+          <button
+            type="button"
+            className="logout-btn"
+            onClick={handleLogout}
+            title="Sign out of your account"
+          >
+            <LogOut size={15} />
+            <span>Sign Out</span>
+          </button>
         </div>
       </aside>
 
@@ -472,14 +722,16 @@ export default function App() {
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 700 }}>
               {activeTab === 'queue' && 'Counter Issue Queue'}
+              {activeTab === 'hod-approvals' && `Department Requisitions (${currentUser.department})`}
               {activeTab === 'dashboard' && 'Store Management Overview'}
-              {activeTab === 'items' && 'Stationery Item Catalog'}
+              {activeTab === 'items' && (['storekeeper', 'admin'].includes(role) ? 'Stationery Item Catalog' : 'Available Stationery Catalog')}
               {activeTab === 'stockin' && 'Goods Receipt (Stock-In)'}
-              {activeTab === 'history' && 'Indent Register & History'}
-              {activeTab === 'reports' && 'Inventory Analytics & Reports'}
+              {activeTab === 'history' && (role === 'hod' ? `Requisition Register - ${currentUser.department}` : 'Indent Register & History')}
+              {activeTab === 'my-indents' && 'My Requisition Submissions'}
+              {activeTab === 'reports' && 'Inventory Analytics & Low Stock Reports'}
               {activeTab === 'users' && 'Staff Accounts & Device Security'}
               {activeTab === 'audit' && 'Security Audit Log'}
-              {activeTab === 'mobile-sim' && 'Faculty Mobile Application (Biometric Flow)'}
+              {activeTab === 'mobile-sim' && (role === 'admin' ? 'Faculty Mobile Application (Biometric Flow)' : 'New Stationery Requisition')}
             </h1>
           </div>
 
@@ -506,14 +758,132 @@ export default function App() {
         </header>
 
         <div className="page-body">
-          {/* TAB: ISSUE QUEUE (The core storekeeper screen) */}
+          {/* TAB: HOD APPROVALS */}
+          {activeTab === 'hod-approvals' && (
+            <div>
+              <div className="stat-grid">
+                <div className="stat-box">
+                  <div>
+                    <div className="stat-label">Pending HOD Approval</div>
+                    <div className="stat-num" style={{ color: '#d97706' }}>{hodPendingIndents.length}</div>
+                  </div>
+                  <Clock size={36} color="#f59e0b" />
+                </div>
+                <div className="stat-box">
+                  <div>
+                    <div className="stat-label">Total Dept Indents</div>
+                    <div className="stat-num">{indents.length}</div>
+                  </div>
+                  <ClipboardList size={36} color="#2563eb" />
+                </div>
+                <div className="stat-box">
+                  <div>
+                    <div className="stat-label">Issued / Completed</div>
+                    <div className="stat-num" style={{ color: '#16a34a' }}>
+                      {indents.filter(i => i.status === 'ISSUED').length}
+                    </div>
+                  </div>
+                  <CheckCircle size={36} color="#16a34a" />
+                </div>
+              </div>
+
+              <div className="card">
+                <div className="card-header">
+                  <div className="card-title">Department Requisitions Awaiting Approval</div>
+                  <div style={{ fontSize: 13, color: '#64748b' }}>
+                    Department: <strong>{currentUser.department}</strong> &bull; HOD action authorization
+                  </div>
+                </div>
+
+                {hodPendingIndents.length === 0 ? (
+                  <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
+                    <CheckCircle size={48} color="#16a34a" style={{ margin: '0 auto 12px' }} />
+                    <h3>No pending approvals!</h3>
+                    <p style={{ marginTop: 4 }}>All faculty requisitions for your department have been reviewed.</p>
+                  </div>
+                ) : (
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Indent #</th>
+                        <th>Faculty Requester</th>
+                        <th>Confirmation</th>
+                        <th>Items Requested</th>
+                        <th>Remarks</th>
+                        <th>HOD Decision</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {hodPendingIndents.map(ind => (
+                        <tr key={ind._id}>
+                          <td>
+                            <strong style={{ fontSize: 15 }}>{ind.indentNo}</strong>
+                            <div style={{ fontSize: 12, color: '#64748b' }}>{new Date(ind.createdAt).toLocaleDateString()} {new Date(ind.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
+                          </td>
+                          <td>
+                            <div style={{ fontWeight: 600 }}>{ind.requester?.name || 'Faculty Member'}</div>
+                            <div style={{ fontSize: 12, color: '#64748b' }}>ID: {ind.requester?.staffId || 'N/A'}</div>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <Fingerprint size={16} color="#16a34a" />
+                              <span className="badge badge-issued" style={{ textTransform: 'capitalize' }}>
+                                {ind.confirmation?.method || 'biometric'}
+                              </span>
+                            </div>
+                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
+                              Device: {ind.confirmation?.deviceId || 'Registered Phone'}
+                            </div>
+                          </td>
+                          <td>
+                            <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
+                              {ind.items.map((it, idx) => (
+                                <li key={idx} style={{ marginBottom: 4 }}>
+                                  <strong>{it.qtyRequested}x</strong> {it.nameSnapshot} <span style={{ fontSize: 11, color: '#64748b' }}>({it.unit})</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </td>
+                          <td>
+                            <span style={{ fontSize: 13, color: '#334155', fontStyle: ind.remarks ? 'normal' : 'italic' }}>
+                              {ind.remarks || 'None specified'}
+                            </span>
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', gap: 8 }}>
+                              <button
+                                onClick={() => handleApproveIndent(ind._id, ind.indentNo)}
+                                className="btn-success"
+                                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '8px 14px' }}>
+                                <Check size={16} />
+                                <span>Approve</span>
+                              </button>
+                              <button
+                                onClick={() => handleRejectIndent(ind._id, ind.indentNo)}
+                                className="btn-danger"
+                                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '8px 14px' }}>
+                                <XCircle size={16} />
+                                <span>Reject</span>
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: ISSUE QUEUE (Storekeeper & Admin) */}
           {activeTab === 'queue' && (
             <div>
               <div className="stat-grid">
                 <div className="stat-box">
                   <div>
                     <div className="stat-label">Awaiting Issue at Counter</div>
-                    <div className="stat-num" style={{ color: '#d97706' }}>{pendingIndents.length}</div>
+                    <div className="stat-num" style={{ color: '#d97706' }}>{pendingCounterIndents.length}</div>
                   </div>
                   <Clock size={36} color="#f59e0b" />
                 </div>
@@ -539,7 +909,7 @@ export default function App() {
                   <div style={{ fontSize: 13, color: '#64748b' }}>Oldest first &bull; Instant atomic stock subtraction</div>
                 </div>
 
-                {pendingIndents.length === 0 ? (
+                {pendingCounterIndents.length === 0 ? (
                   <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
                     <CheckCircle size={48} color="#16a34a" style={{ margin: '0 auto 12px' }} />
                     <h3>Queue is clear!</h3>
@@ -551,31 +921,38 @@ export default function App() {
                       <tr>
                         <th>Indent #</th>
                         <th>Requester / Dept</th>
-                        <th>Biometric Confirmation</th>
+                        <th>Verification Status</th>
                         <th>Items Requested</th>
                         <th>Action</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {pendingIndents.map(ind => (
+                      {pendingCounterIndents.map(ind => (
                         <tr key={ind._id}>
                           <td>
                             <strong style={{ fontSize: 15 }}>{ind.indentNo}</strong>
                             <div style={{ fontSize: 12, color: '#64748b' }}>{new Date(ind.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
                           </td>
                           <td>
-                            <div style={{ fontWeight: 600 }}>{ind.requester?.name || 'Faculty Member'}</div>
+                            <div style={{ fontWeight: 600 }}>{ind.requester?.name || 'Staff Member'}</div>
                             <div style={{ fontSize: 12, color: '#64748b' }}>{ind.department} ({ind.requester?.staffId || 'ID'})</div>
                           </td>
                           <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <Fingerprint size={16} color="#16a34a" />
-                              <span className="badge badge-issued" style={{ textTransform: 'capitalize' }}>
-                                {ind.confirmation?.method || 'biometric'} confirmed
-                              </span>
-                            </div>
-                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                              Device: {ind.confirmation?.deviceId || 'Registered Phone'}
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                                <Fingerprint size={16} color="#16a34a" />
+                                <span className="badge badge-issued" style={{ textTransform: 'capitalize' }}>
+                                  {ind.confirmation?.method || 'biometric'} confirmed
+                                </span>
+                              </div>
+                              {ind.status === 'APPROVED' && (
+                                <span className="badge" style={{ background: '#e0f2fe', color: '#0369a1', width: 'fit-content' }}>
+                                  HOD Approved
+                                </span>
+                              )}
+                              <div style={{ fontSize: 11, color: '#64748b' }}>
+                                Device: {ind.confirmation?.deviceId || 'Registered Phone'}
+                              </div>
                             </div>
                           </td>
                           <td>
@@ -605,7 +982,7 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: STORE SUMMARY */}
+          {/* TAB: STORE SUMMARY (Storekeeper & Admin) */}
           {activeTab === 'dashboard' && (
             <div>
               <div className="stat-grid">
@@ -662,7 +1039,7 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: ITEMS INVENTORY */}
+          {/* TAB: ITEMS INVENTORY / CATALOG (All roles) */}
           {activeTab === 'items' && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
@@ -675,13 +1052,15 @@ export default function App() {
                     style={{ width: 320 }}
                   />
                 </div>
-                <button
-                  onClick={() => setNewItemModal(true)}
-                  className="btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Plus size={16} />
-                  <span>Add New Item</span>
-                </button>
+                {['storekeeper', 'admin'].includes(role) && (
+                  <button
+                    onClick={() => setNewItemModal(true)}
+                    className="btn-primary"
+                    style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Plus size={16} />
+                    <span>Add New Item</span>
+                  </button>
+                )}
               </div>
 
               <div className="card">
@@ -692,7 +1071,7 @@ export default function App() {
                       <th>Item Name</th>
                       <th>Category</th>
                       <th>Current Stock</th>
-                      <th>Reorder Level</th>
+                      {['storekeeper', 'admin'].includes(role) && <th>Reorder Level</th>}
                       <th>Status</th>
                     </tr>
                   </thead>
@@ -707,7 +1086,9 @@ export default function App() {
                             {item.stock} {item.unit}
                           </span>
                         </td>
-                        <td>{item.reorderLevel} {item.unit}</td>
+                        {['storekeeper', 'admin'].includes(role) && (
+                          <td>{item.reorderLevel} {item.unit}</td>
+                        )}
                         <td>
                           {item.stock <= item.reorderLevel ? (
                             <span className="badge badge-low-stock">Low Stock Alert</span>
@@ -723,7 +1104,7 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: STOCK-IN (RECEIVE NEW GOODS) */}
+          {/* TAB: STOCK-IN (Storekeeper & Admin) */}
           {activeTab === 'stockin' && (
             <div style={{ maxWidth: 640, margin: '0 auto' }}>
               <div className="card">
@@ -788,7 +1169,7 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: HISTORY */}
+          {/* TAB: REQUISITION HISTORY (Storekeeper, Admin, HOD) */}
           {activeTab === 'history' && (
             <div>
               <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
@@ -802,7 +1183,9 @@ export default function App() {
                 <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
                   <option value="ALL">All Statuses</option>
                   <option value="REQUESTED">REQUESTED</option>
+                  <option value="APPROVED">APPROVED</option>
                   <option value="ISSUED">ISSUED</option>
+                  <option value="REJECTED">REJECTED</option>
                   <option value="CANCELLED">CANCELLED</option>
                 </select>
               </div>
@@ -844,7 +1227,75 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: REPORTS & LOW STOCK */}
+          {/* TAB: MY INDENTS (Faculty & Staff) */}
+          {activeTab === 'my-indents' && (
+            <div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+                <div>
+                  <h3 style={{ fontSize: 18 }}>My Submitted Requisitions</h3>
+                  <p style={{ fontSize: 13, color: '#64748b' }}>Track approval and collection status of your stationery requests</p>
+                </div>
+                <button
+                  onClick={() => setActiveTab('mobile-sim')}
+                  className="btn-primary"
+                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Plus size={16} />
+                  <span>New Requisition</span>
+                </button>
+              </div>
+
+              <div className="card">
+                {myIndents.length === 0 ? (
+                  <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
+                    <ClipboardList size={48} color="#94a3b8" style={{ margin: '0 auto 12px' }} />
+                    <h3>No requisitions submitted yet</h3>
+                    <p style={{ marginTop: 4 }}>Use the 'New Requisition' button to request items from the central store.</p>
+                  </div>
+                ) : (
+                  <table className="data-table">
+                    <thead>
+                      <tr>
+                        <th>Indent #</th>
+                        <th>Submitted At</th>
+                        <th>Items Requested</th>
+                        <th>Confirmation</th>
+                        <th>Status</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {myIndents.map(ind => (
+                        <tr key={ind._id}>
+                          <td><strong>{ind.indentNo}</strong></td>
+                          <td>{new Date(ind.createdAt).toLocaleString()}</td>
+                          <td>
+                            <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
+                              {ind.items.map((it, idx) => (
+                                <li key={idx} style={{ marginBottom: 2 }}>
+                                  <strong>{it.qtyRequested}x</strong> {it.nameSnapshot} ({it.unit})
+                                </li>
+                              ))}
+                            </ul>
+                          </td>
+                          <td>
+                            <span style={{ fontSize: 12, color: '#64748b' }}>
+                              {ind.confirmation?.method || 'biometric'} confirmed
+                            </span>
+                          </td>
+                          <td>
+                            <span className={`badge badge-${ind.status.toLowerCase()}`}>
+                              {ind.status}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* TAB: REPORTS & LOW STOCK (Storekeeper & Admin) */}
           {activeTab === 'reports' && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 20 }}>
@@ -1009,7 +1460,7 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: PHONE APP SIMULATOR (Live mobile flow testing for Person B) */}
+          {/* TAB: PHONE APP SIMULATOR (Authenticated Requisition Flow) */}
           {activeTab === 'mobile-sim' && (
             <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0' }}>
               <div style={{
@@ -1030,7 +1481,7 @@ export default function App() {
 
                 {/* Mobile Header */}
                 <div style={{ padding: '16px 20px', borderBottom: '1px solid #1e293b' }}>
-                  <div style={{ fontSize: 12, color: '#38bdf8' }}>Faculty Mobile Portal</div>
+                  <div style={{ fontSize: 12, color: '#38bdf8' }}>Institutional Requisition Portal</div>
                   <div style={{ fontSize: 16, fontWeight: 700 }}>{currentUser.name}</div>
                   <div style={{ fontSize: 11, color: '#94a3b8' }}>{currentUser.department} &bull; ID: {currentUser.staffId}</div>
                 </div>
@@ -1056,7 +1507,7 @@ export default function App() {
                     <div>
                       <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#cbd5e1' }}>Select Items to Requisition:</div>
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto', marginBottom: 16 }}>
-                        {items.slice(0, 6).map(it => {
+                        {items.slice(0, 8).map(it => {
                           const inCart = mobileCart.find(c => c.itemId === it._id);
                           return (
                             <div key={it._id} style={{ background: '#1e293b', padding: '10px 12px', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -1236,7 +1687,7 @@ export default function App() {
                   <input
                     type="text"
                     value={newUser.staffId}
-                    onChange={e => setNewUser({ ...newUser, staffId: e.target.value })}
+                    onChange={e => setNewUser({ ...newUser, staffId: e.target.value.toUpperCase() })}
                     placeholder="e.g. FAC103"
                     style={{ width: '100%' }}
                     required
@@ -1305,7 +1756,7 @@ export default function App() {
               </div>
 
               <div style={{ fontSize: 12, color: '#64748b', background: '#f8fafc', padding: 10, borderRadius: 6, border: '1px solid #e2e8f0' }}>
-                Default initial password will be set to: <code>Password@123</code> (must change on first login).
+                Default initial password will be set to: <code>Password@123</code>.
               </div>
 
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>

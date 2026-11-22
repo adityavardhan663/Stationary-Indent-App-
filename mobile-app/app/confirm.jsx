@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } fr
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import client from '../src/api/client';
 import { authenticateBiometrics } from '../src/biometrics/confirm';
+import { getInstallationDeviceId } from '../src/auth/deviceId';
 
 export default function ConfirmScreen() {
   const router = useRouter();
@@ -18,16 +19,24 @@ export default function ConfirmScreen() {
       const authResult = await authenticateBiometrics('Touch fingerprint sensor to confirm your stationery indent');
 
       if (!authResult.success) {
-        Alert.alert('Verification Failed', 'Biometric authentication was cancelled or could not be verified.');
-        setLoading(false);
+        if (authResult.blocked) {
+          Alert.alert('Screen Lock Required', authResult.error);
+        } else if (authResult.cancelled) {
+          Alert.alert('Verification Cancelled', 'Requisition was not submitted. You can try again when ready.');
+        } else {
+          Alert.alert('Verification Failed', authResult.error || 'Authentication could not be verified.');
+        }
         return;
       }
+
+      // Resolve persistent installation deviceId
+      const deviceId = await getInstallationDeviceId();
 
       const payload = {
         items: parsedItems.map(i => ({ itemId: i.itemId, quantity: i.qty })),
         confirmation: {
           method: authResult.method || 'biometric',
-          deviceId: 'dev-phone-app'
+          deviceId
         },
         remarks
       };
