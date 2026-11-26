@@ -6,9 +6,18 @@ import { getSecureToken, deleteSecureToken } from '../auth/storage';
 
 // Your laptop's IP can be configured through EXPO_PUBLIC_DEV_IP.
 // The fallback is your previously configured laptop IP.
-export const LOCAL_DEV_IP =
-  process.env.EXPO_PUBLIC_DEV_IP || '172.15.13.66';
+import Constants from 'expo-constants';
 
+function getDevHost() {
+  const hostUri =
+    Constants.expoConfig?.hostUri ||
+    Constants.expoGoConfig?.debuggerHost ||
+    null;
+  return hostUri ? hostUri.split(':')[0] : null;
+}
+
+// Priority: full URL override > auto-detected Metro host > .env IP > localhost
+export const LOCAL_DEV_IP = getDevHost() || process.env.EXPO_PUBLIC_DEV_IP || 'localhost';
 // Backend API URL
 export const API_BASE_URL =
   Platform.OS === 'web'
