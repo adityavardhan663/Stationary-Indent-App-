@@ -8,19 +8,30 @@ import {
   Alert,
   ActivityIndicator,
   Modal,
-  TextInput
+  TextInput,
+  RefreshControl
 } from 'react-native';
 import client from '../../src/api/client';
 import { getSecureToken } from '../../src/auth/storage';
 import { parseIndentDetails } from '../../src/utils/indentDetails';
 import StatusTimeline from '../../src/components/StatusTimeline';
+import StatusBadge from '../../src/components/StatusBadge';
+import Card from '../../src/components/Card';
+import ScreenHeader from '../../src/components/ScreenHeader';
+import EmptyState from '../../src/components/EmptyState';
+import LoadingState from '../../src/components/LoadingState';
+import ErrorState from '../../src/components/ErrorState';
+import PrimaryButton from '../../src/components/PrimaryButton';
+import { colors, radii, spacing, typography, layout } from '../../src/theme';
 
 export default function ApprovalsScreen() {
   const [activeTab, setActiveTab] = useState('pending'); // 'pending' | 'decided'
   const [pendingIndents, setPendingIndents] = useState([]);
   const [decidedIndents, setDecidedIndents] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
+  const [error, setError] = useState(null);
   const [user, setUser] = useState(null);
   const [expandedIds, setExpandedIds] = useState({});
 
@@ -33,23 +44,22 @@ export default function ApprovalsScreen() {
     const token = await getSecureToken('authToken');
     if (!token) return;
 
-    setLoading(true);
+    setError(null);
     try {
       const storedUser = await getSecureToken('userProfile');
       if (storedUser) {
         setUser(JSON.parse(storedUser));
       }
 
-      // Fetch all department indents
       const res = await client.get('/indents');
       const all = res.data?.data || [];
-      setPendingIndents(all.filter(i => i.status === 'REQUESTED'));
-      setDecidedIndents(all.filter(i => i.status !== 'REQUESTED'));
+      setPendingIndents(all.filter((i) => i.status === 'REQUESTED'));
+      setDecidedIndents(all.filter((i) => i.status !== 'REQUESTED'));
     } catch (err) {
-      console.warn('Failed to load approvals:', err.message);
-      Alert.alert('Error', err.response?.data?.message || 'Could not load department requisitions');
+      setError(err.response?.data?.message || 'Could not load department requisitions. Please check connection.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   };
 
@@ -57,8 +67,13 @@ export default function ApprovalsScreen() {
     fetchDepartmentIndents();
   }, []);
 
+  const onRefresh = () => {
+    setRefreshing(true);
+    fetchDepartmentIndents();
+  };
+
   const toggleExpand = (id) => {
-    setExpandedIds(prev => ({
+    setExpandedIds((prev) => ({
       ...prev,
       [id]: !prev[id]
     }));
@@ -121,21 +136,47 @@ export default function ApprovalsScreen() {
 
   const currentList = activeTab === 'pending' ? pendingIndents : decidedIndents;
 
+  if (loading && !refreshing) {
+    return (
+      <View style={styles.container}>
+        <LoadingState skeleton count={3} />
+      </View>
+    );
+  }
+
+  if (error && pendingIndents.length === 0 && decidedIndents.length === 0) {
+    return (
+      <View style={styles.container}>
+        <ErrorState
+          title="Could Not Load Approvals"
+          message={error}
+          onRetry={fetchDepartmentIndents}
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
-      {/* Department Info Header */}
-      <View style={styles.headerBar}>
-        <Text style={styles.headerDept}>
-          Department: <Text style={styles.deptHighlight}>{user?.department || 'My Department'}</Text>
-        </Text>
-        <Text style={styles.headerCount}>{pendingIndents.length} Pending</Text>
-      </View>
+      {/* Department Header */}
+      <ScreenHeader
+        title={user?.department || 'Department Approvals'}
+        subtitle="Department Head Review & Authorization"
+        rightElement={
+          <View style={styles.pendingBadge}>
+            <Text style={styles.pendingBadgeText}>
+              {pendingIndents.length} PENDING
+            </Text>
+          </View>
+        }
+      />
 
-      {/* Segmented Tab Bar: Pending vs Decided */}
+      {/* Segmented Tab Controls */}
       <View style={styles.tabContainer}>
         <TouchableOpacity
           style={[styles.tabButton, activeTab === 'pending' && styles.tabButtonActive]}
-          onPress={() => setActiveTab('pending')}>
+          onPress={() => setActiveTab('pending')}
+          activeOpacity={0.7}>
           <Text style={[styles.tabText, activeTab === 'pending' && styles.tabTextActive]}>
             Pending Approvals ({pendingIndents.length})
           </Text>
@@ -143,7 +184,8 @@ export default function ApprovalsScreen() {
 
         <TouchableOpacity
           style={[styles.tabButton, activeTab === 'decided' && styles.tabButtonActive]}
-          onPress={() => setActiveTab('decided')}>
+          onPress={() => setActiveTab('decided')}
+          activeOpacity={0.7}>
           <Text style={[styles.tabText, activeTab === 'decided' && styles.tabTextActive]}>
             Decided History ({decidedIndents.length})
           </Text>
@@ -152,7 +194,7 @@ export default function ApprovalsScreen() {
 
       {actionLoading && (
         <View style={styles.loadingBanner}>
-          <ActivityIndicator color="#38bdf8" size="small" />
+          <ActivityIndicator color={colors.primaryLight} size="small" />
           <Text style={styles.loadingBannerText}>Updating requisition status...</Text>
         </View>
       )}
@@ -160,19 +202,24 @@ export default function ApprovalsScreen() {
       <FlatList
         data={currentList}
         keyExtractor={(item) => item._id}
-        refreshing={loading}
-        onRefresh={fetchDepartmentIndents}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={colors.primaryLight}
+          />
+        }
+        contentContainerStyle={styles.listContainer}
         ListEmptyComponent={
-          <View style={styles.emptyContainer}>
-            <Text style={styles.emptyTitle}>
-              {activeTab === 'pending' ? 'Queue is Clear' : 'No Decided Records'}
-            </Text>
-            <Text style={styles.emptyText}>
-              {activeTab === 'pending'
+          <EmptyState
+            icon={activeTab === 'pending' ? '🎉' : '📂'}
+            title={activeTab === 'pending' ? 'Queue is Clear' : 'No Decided Records'}
+            description={
+              activeTab === 'pending'
                 ? `No pending requisitions awaiting your HOD approval in ${user?.department || 'your department'}.`
-                : 'No past approved or rejected requisitions found for your department.'}
-            </Text>
-          </View>
+                : 'No past approved or rejected requisitions found for your department.'
+            }
+          />
         }
         renderItem={({ item }) => {
           const details = parseIndentDetails(item);
@@ -181,7 +228,9 @@ export default function ApprovalsScreen() {
           const isPending = item.status === 'REQUESTED';
 
           return (
-            <View style={[styles.card, isUrgent && styles.cardUrgentBorder]}>
+            <Card
+              style={styles.card}
+              activeBorder={isUrgent ? colors.dangerBorder : null}>
               <View style={styles.cardHeader}>
                 <View style={{ flex: 1 }}>
                   <Text style={styles.indentNo}>{item.indentNo}</Text>
@@ -192,27 +241,34 @@ export default function ApprovalsScreen() {
 
                 <View style={styles.badgeRow}>
                   {details.urgency ? (
-                    <View style={[
-                      styles.urgencyBadge,
-                      isUrgent ? styles.urgencyBadgeUrgent : styles.urgencyBadgeNormal
-                    ]}>
-                      <Text style={[
-                        styles.urgencyText,
-                        isUrgent ? styles.urgencyTextUrgent : styles.urgencyTextNormal
+                    <View
+                      style={[
+                        styles.urgencyBadge,
+                        isUrgent ? styles.urgencyBadgeUrgent : styles.urgencyBadgeNormal
                       ]}>
+                      <Text
+                        style={[
+                          styles.urgencyText,
+                          isUrgent ? styles.urgencyTextUrgent : styles.urgencyTextNormal
+                        ]}>
                         {isUrgent ? '⚠️ URGENT' : details.urgency.toUpperCase()}
                       </Text>
                     </View>
                   ) : null}
 
-                  <View style={[styles.badge, styles['badge_' + item.status?.toLowerCase()]]}>
-                    <Text style={styles.badgeText}>{item.status}</Text>
-                  </View>
+                  <StatusBadge status={item.status} />
                 </View>
               </View>
 
               <Text style={styles.timestamp}>
-                Requested: {new Date(item.createdAt).toLocaleString()}
+                Requested: {new Date(item.createdAt).toLocaleString('en-GB', {
+                  day: 'numeric',
+                  month: 'short',
+                  year: 'numeric',
+                  hour: 'numeric',
+                  minute: '2-digit',
+                  hour12: true
+                })}
               </Text>
 
               {details.neededBy ? (
@@ -222,6 +278,7 @@ export default function ApprovalsScreen() {
                 </View>
               ) : null}
 
+              {/* Items Section */}
               <View style={styles.itemsSection}>
                 <Text style={styles.sectionSubtitle}>Requested Items:</Text>
                 {item.items?.map((it, idx) => (
@@ -235,6 +292,7 @@ export default function ApprovalsScreen() {
                 ))}
               </View>
 
+              {/* Purpose & Notes */}
               {details.purpose ? (
                 <View style={[styles.detailsBox, isUrgent && styles.purposeBoxUrgent]}>
                   <Text style={styles.detailsLabel}>Purpose / Reason:</Text>
@@ -258,26 +316,28 @@ export default function ApprovalsScreen() {
 
               <View style={styles.biometricBadge}>
                 <Text style={styles.biometricText}>
-                  🔒 Verified via {item.confirmation?.method || 'biometric'} on {item.confirmation?.deviceId || 'registered device'}
+                  🔒 Verified via {item.confirmation?.method || 'biometric'} on {item.confirmation?.deviceId || 'device'}
                 </Text>
               </View>
 
-              {/* Action Buttons for Pending Requisitions */}
+              {/* Action Buttons for Pending Items */}
               {isPending && (
                 <View style={styles.actionsRow}>
-                  <TouchableOpacity
-                    style={[styles.btn, styles.rejectBtn]}
+                  <PrimaryButton
+                    title="Reject"
+                    variant="danger"
                     onPress={() => openRejectModal(item)}
-                    disabled={actionLoading}>
-                    <Text style={styles.rejectBtnText}>Reject</Text>
-                  </TouchableOpacity>
+                    disabled={actionLoading}
+                    style={styles.actionBtnReject}
+                  />
 
-                  <TouchableOpacity
-                    style={[styles.btn, styles.approveBtn]}
+                  <PrimaryButton
+                    title="Approve Indent"
+                    variant="success"
                     onPress={() => handleApprove(item)}
-                    disabled={actionLoading}>
-                    <Text style={styles.approveBtnText}>Approve Indent</Text>
-                  </TouchableOpacity>
+                    disabled={actionLoading}
+                    style={styles.actionBtnApprove}
+                  />
                 </View>
               )}
 
@@ -285,7 +345,8 @@ export default function ApprovalsScreen() {
               <TouchableOpacity
                 style={styles.trackToggleBtn}
                 onPress={() => toggleExpand(item._id)}
-                activeOpacity={0.7}>
+                activeOpacity={0.7}
+                accessibilityLabel="Toggle request timeline">
                 <Text style={styles.trackToggleText}>
                   {isExpanded ? '▴ Hide Request Timeline' : '▾ Track Request Status'}
                 </Text>
@@ -296,28 +357,28 @@ export default function ApprovalsScreen() {
                   <StatusTimeline indent={item} />
                 </View>
               )}
-            </View>
+            </Card>
           );
         }}
       />
 
-      {/* Reject Modal */}
+      {/* Reject Reason Modal */}
       <Modal
         visible={rejectModalVisible}
         transparent
         animationType="fade"
         onRequestClose={() => setRejectModalVisible(false)}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+          <Card style={styles.modalCard}>
             <Text style={styles.modalTitle}>Reject Requisition</Text>
             <Text style={styles.modalSubtitle}>
-              Please provide a reason for rejecting indent {selectedIndent?.indentNo}:
+              Please provide a clear reason for rejecting indent {selectedIndent?.indentNo}:
             </Text>
 
             <TextInput
               style={styles.modalInput}
               placeholder="e.g. Existing department stock available / exceeds semester quota"
-              placeholderTextColor="#64748b"
+              placeholderTextColor={colors.textDim}
               value={rejectReason}
               onChangeText={setRejectReason}
               multiline
@@ -325,20 +386,22 @@ export default function ApprovalsScreen() {
             />
 
             <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalCancelBtn]}
-                onPress={() => setRejectModalVisible(false)}>
-                <Text style={styles.modalCancelText}>Cancel</Text>
-              </TouchableOpacity>
+              <PrimaryButton
+                title="Cancel"
+                variant="secondary"
+                onPress={() => setRejectModalVisible(false)}
+                style={styles.modalBtnCancel}
+              />
 
-              <TouchableOpacity
-                style={[styles.modalBtn, styles.modalConfirmRejectBtn]}
+              <PrimaryButton
+                title="Confirm Rejection"
+                variant="danger"
                 onPress={handleConfirmReject}
-                disabled={actionLoading}>
-                <Text style={styles.modalConfirmRejectText}>Confirm Rejection</Text>
-              </TouchableOpacity>
+                loading={actionLoading}
+                style={styles.modalBtnReject}
+              />
             </View>
-          </View>
+          </Card>
         </View>
       </Modal>
     </View>
@@ -346,260 +409,281 @@ export default function ApprovalsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#090d16', padding: 14 },
-  headerBar: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    backgroundColor: '#1e293b',
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: '#334155'
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+    padding: spacing.md
   },
-  headerDept: { color: '#94a3b8', fontSize: 13 },
-  deptHighlight: { color: '#38bdf8', fontWeight: '700' },
-  headerCount: { color: '#fbbf24', fontSize: 13, fontWeight: '700' },
-
-  // Segmented Tabs
+  listContainer: {
+    paddingBottom: spacing.xxxl
+  },
+  pendingBadge: {
+    backgroundColor: colors.warningSubtle,
+    borderWidth: 1,
+    borderColor: colors.warningBorder,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs + 1,
+    borderRadius: radii.xs
+  },
+  pendingBadgeText: {
+    color: colors.warningLight,
+    fontSize: typography.xs,
+    fontWeight: '800'
+  },
   tabContainer: {
     flexDirection: 'row',
-    backgroundColor: '#0f172a',
-    borderRadius: 8,
+    backgroundColor: colors.backgroundElevated,
+    borderRadius: radii.md,
     padding: 3,
-    marginBottom: 12,
+    marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: '#1e293b'
+    borderColor: colors.border
   },
   tabButton: {
     flex: 1,
-    paddingVertical: 8,
+    minHeight: layout.minTouchTarget - 6,
+    justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 6
+    borderRadius: radii.sm
   },
   tabButtonActive: {
-    backgroundColor: '#2563eb'
+    backgroundColor: colors.primary
   },
   tabText: {
-    color: '#94a3b8',
-    fontSize: 12,
+    color: colors.textMuted,
+    fontSize: typography.xs + 1,
     fontWeight: '600'
   },
   tabTextActive: {
-    color: '#fff',
+    color: '#ffffff',
     fontWeight: '700'
   },
-
   loadingBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    backgroundColor: '#0f172a',
-    padding: 10,
-    borderRadius: 6,
-    marginBottom: 10,
+    gap: spacing.sm,
+    backgroundColor: colors.backgroundElevated,
+    padding: spacing.sm,
+    borderRadius: radii.sm,
+    marginBottom: spacing.sm,
     justifyContent: 'center'
   },
-  loadingBannerText: { color: '#38bdf8', fontSize: 13 },
-  card: {
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 16,
-    marginBottom: 14,
-    borderWidth: 1,
-    borderColor: '#334155'
+  loadingBannerText: {
+    color: colors.primaryLight,
+    fontSize: typography.sm
   },
-  cardUrgentBorder: {
-    borderColor: '#b91c1c'
+  card: {
+    padding: spacing.lg,
+    marginBottom: spacing.md
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-    marginBottom: 6
+    marginBottom: spacing.xs
   },
-  indentNo: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  requesterInfo: { color: '#cbd5e1', fontSize: 13, marginTop: 2, fontWeight: '500' },
+  indentNo: {
+    color: colors.text,
+    fontSize: typography.md,
+    fontWeight: '700'
+  },
+  requesterInfo: {
+    color: colors.textSecondary,
+    fontSize: typography.sm,
+    marginTop: 2,
+    fontWeight: '500'
+  },
   badgeRow: {
     flexDirection: 'row',
-    gap: 6,
+    gap: spacing.xs,
     alignItems: 'center'
   },
   urgencyBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 3,
-    borderRadius: 4
+    paddingHorizontal: spacing.sm - 1,
+    paddingVertical: spacing.xxs,
+    borderRadius: radii.xs,
+    borderWidth: 1
   },
   urgencyBadgeUrgent: {
-    backgroundColor: '#450a0a',
-    borderWidth: 1,
-    borderColor: '#ef4444'
+    backgroundColor: colors.dangerSubtle,
+    borderColor: colors.dangerBorder
   },
   urgencyBadgeNormal: {
-    backgroundColor: '#0c4a6e',
-    borderWidth: 1,
-    borderColor: '#0284c7'
+    backgroundColor: colors.primarySubtle,
+    borderColor: colors.borderFocus
   },
   urgencyText: {
-    fontSize: 10,
+    fontSize: typography.xs - 1,
     fontWeight: '700'
   },
   urgencyTextUrgent: {
-    color: '#f87171'
+    color: colors.dangerLight
   },
   urgencyTextNormal: {
-    color: '#38bdf8'
+    color: colors.primaryLight
   },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 4,
-    borderWidth: 1
+  timestamp: {
+    color: colors.textDim,
+    fontSize: typography.xs,
+    marginBottom: spacing.sm
   },
-  badgeText: {
-    fontSize: 10,
-    fontWeight: '700'
-  },
-  badge_requested: {
-    backgroundColor: '#451a03',
-    borderColor: '#b45309'
-  },
-  'badge_requested Text': {
-    color: '#fbbf24'
-  },
-  badge_approved: {
-    backgroundColor: '#0c4a6e',
-    borderColor: '#0284c7'
-  },
-  badge_issued: {
-    backgroundColor: '#052e16',
-    borderColor: '#16a34a'
-  },
-  badge_rejected: {
-    backgroundColor: '#450a0a',
-    borderColor: '#dc2626'
-  },
-  badge_cancelled: {
-    backgroundColor: '#1e293b',
-    borderColor: '#475569'
-  },
-  timestamp: { color: '#64748b', fontSize: 12, marginBottom: 8 },
   neededByBanner: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#0f172a',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 6,
-    marginBottom: 10,
+    gap: spacing.xs,
+    backgroundColor: colors.backgroundElevated,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radii.sm,
+    marginBottom: spacing.sm,
     borderLeftWidth: 3,
-    borderLeftColor: '#38bdf8'
+    borderLeftColor: colors.primaryLight
   },
   neededByLabel: {
-    color: '#94a3b8',
-    fontSize: 12
+    color: colors.textMuted,
+    fontSize: typography.xs
   },
   neededByDate: {
-    color: '#38bdf8',
-    fontSize: 12,
+    color: colors.primaryLight,
+    fontSize: typography.xs,
     fontWeight: '700'
   },
   itemsSection: {
-    backgroundColor: '#0f172a',
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 10
+    backgroundColor: colors.backgroundElevated,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.sm
   },
-  sectionSubtitle: { color: '#94a3b8', fontSize: 11, fontWeight: '600', marginBottom: 6 },
-  itemRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 2 },
-  itemName: { color: '#e2e8f0', fontSize: 13 },
-  itemQty: { color: '#38bdf8', fontSize: 13, fontWeight: '700' },
+  sectionSubtitle: {
+    color: colors.textMuted,
+    fontSize: typography.xs,
+    fontWeight: '600',
+    marginBottom: spacing.xs
+  },
+  itemRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 2
+  },
+  itemName: {
+    color: colors.textSecondary,
+    fontSize: typography.sm
+  },
+  itemQty: {
+    color: colors.primaryLight,
+    fontSize: typography.sm,
+    fontWeight: '700'
+  },
   detailsBox: {
-    backgroundColor: '#0f172a',
-    borderRadius: 6,
-    padding: 10,
-    marginBottom: 8,
+    backgroundColor: colors.backgroundElevated,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    marginBottom: spacing.xs,
     borderLeftWidth: 3,
-    borderLeftColor: '#38bdf8'
+    borderLeftColor: colors.primaryLight
   },
   purposeBoxUrgent: {
-    borderLeftColor: '#ef4444',
-    backgroundColor: '#1c1917'
+    borderLeftColor: colors.danger,
+    backgroundColor: colors.dangerSubtle
   },
-  detailsLabel: { color: '#94a3b8', fontSize: 11, fontWeight: '600', marginBottom: 2 },
-  detailsText: { color: '#cbd5e1', fontSize: 12, lineHeight: 16 },
-  biometricBadge: { marginVertical: 6 },
-  biometricText: { color: '#4ade80', fontSize: 11, fontStyle: 'italic' },
+  detailsLabel: {
+    color: colors.textMuted,
+    fontSize: typography.xs - 1,
+    fontWeight: '700',
+    marginBottom: 2
+  },
+  detailsText: {
+    color: colors.textPrimary,
+    fontSize: typography.xs,
+    lineHeight: 16
+  },
+  biometricBadge: {
+    marginVertical: spacing.xs
+  },
+  biometricText: {
+    color: colors.successLight,
+    fontSize: typography.xs,
+    fontStyle: 'italic'
+  },
   actionsRow: {
     flexDirection: 'row',
-    gap: 10,
-    marginTop: 6,
+    gap: spacing.md,
+    marginTop: spacing.sm,
     borderTopWidth: 1,
-    borderTopColor: '#334155',
-    paddingTop: 12
+    borderTopColor: colors.border,
+    paddingTop: spacing.md
   },
-  btn: { flex: 1, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  approveBtn: { backgroundColor: '#16a34a' },
-  approveBtnText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  rejectBtn: { backgroundColor: '#334155', borderWidth: 1, borderColor: '#ef4444' },
-  rejectBtnText: { color: '#ef4444', fontSize: 14, fontWeight: '600' },
+  actionBtnReject: {
+    flex: 1
+  },
+  actionBtnApprove: {
+    flex: 1.5
+  },
   trackToggleBtn: {
-    marginTop: 10,
-    paddingVertical: 8,
+    marginTop: spacing.md,
+    minHeight: layout.minTouchTarget,
+    justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: '#0f172a',
-    borderRadius: 6,
+    backgroundColor: colors.backgroundElevated,
+    borderRadius: radii.sm,
     borderWidth: 1,
-    borderColor: '#334155'
+    borderColor: colors.border
   },
   trackToggleText: {
-    color: '#38bdf8',
-    fontSize: 12,
+    color: colors.primaryLight,
+    fontSize: typography.xs + 1,
     fontWeight: '700'
   },
   timelineWrapper: {
-    marginTop: 10,
-    paddingTop: 8,
+    marginTop: spacing.md,
+    paddingTop: spacing.sm,
     borderTopWidth: 1,
-    borderTopColor: '#334155'
+    borderTopColor: colors.border
   },
-  emptyContainer: { padding: 48, alignItems: 'center' },
-  emptyTitle: { color: '#fff', fontSize: 17, fontWeight: '700', marginBottom: 6 },
-  emptyText: { color: '#64748b', fontSize: 13, textAlign: 'center', lineHeight: 18 },
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.7)',
+    backgroundColor: colors.modalOverlay,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: 20
+    padding: spacing.xl
   },
   modalCard: {
     width: '100%',
-    backgroundColor: '#1e293b',
-    borderRadius: 14,
-    padding: 20,
-    borderWidth: 1,
-    borderColor: '#334155'
+    padding: spacing.xl,
+    borderRadius: radii.xl
   },
-  modalTitle: { color: '#fff', fontSize: 18, fontWeight: '700', marginBottom: 4 },
-  modalSubtitle: { color: '#94a3b8', fontSize: 13, marginBottom: 12 },
+  modalTitle: {
+    color: colors.text,
+    fontSize: typography.lg,
+    fontWeight: '700',
+    marginBottom: spacing.xxs
+  },
+  modalSubtitle: {
+    color: colors.textMuted,
+    fontSize: typography.sm,
+    marginBottom: spacing.md
+  },
   modalInput: {
-    backgroundColor: '#0f172a',
-    color: '#fff',
-    borderRadius: 8,
-    padding: 12,
+    backgroundColor: colors.backgroundElevated,
+    color: colors.text,
+    borderRadius: radii.md,
+    padding: spacing.md,
     borderWidth: 1,
-    borderColor: '#334155',
+    borderColor: colors.border,
     textAlignVertical: 'top',
-    fontSize: 13,
-    marginBottom: 16
+    fontSize: typography.sm,
+    minHeight: 80,
+    marginBottom: spacing.lg
   },
-  modalActions: { flexDirection: 'row', gap: 10, justifyContent: 'flex-end' },
-  modalBtn: { paddingVertical: 10, paddingHorizontal: 16, borderRadius: 6 },
-  modalCancelBtn: { backgroundColor: '#334155' },
-  modalCancelText: { color: '#cbd5e1', fontSize: 13, fontWeight: '600' },
-  modalConfirmRejectBtn: { backgroundColor: '#dc2626' },
-  modalConfirmRejectText: { color: '#fff', fontSize: 13, fontWeight: '600' }
+  modalActions: {
+    flexDirection: 'row',
+    gap: spacing.md,
+    justifyContent: 'flex-end'
+  },
+  modalBtnCancel: {
+    minWidth: 100
+  },
+  modalBtnReject: {
+    minWidth: 140
+  }
 });

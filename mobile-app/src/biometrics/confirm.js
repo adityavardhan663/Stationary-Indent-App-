@@ -15,10 +15,10 @@ import { Platform } from 'react-native';
 export async function authenticateBiometrics(promptReason = 'Confirm your stationery requisition') {
   if (Platform.OS === 'web') {
     return {
-      success: true,
-      method: 'biometric',
+      success: false,
+      blocked: true,
       web: true,
-      message: 'Web preview: Hardware biometrics simulated successfully.'
+      error: 'Fingerprint confirmation is only available in the mobile app'
     };
   }
 

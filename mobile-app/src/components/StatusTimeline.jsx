@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { parseIndentDetails } from '../utils/indentDetails';
+import { colors, radii, spacing, typography } from '../theme';
 
 /**
  * Formats a date string or Date object to "24 Nov 2026, 10:10 AM".
@@ -35,7 +36,6 @@ function formatPersonName(person, fallbackRole = 'Staff') {
     return fallbackRole;
   }
   if (typeof person === 'string') {
-    // Check if it's an ObjectId or memory id (e.g., u001, 674582f3...)
     if (/^[0-9a-fA-F]{24}$/.test(person) || /^u\d+$/.test(person) || /^[0-9a-fA-F-]{36}$/.test(person)) {
       return fallbackRole;
     }
@@ -97,7 +97,6 @@ function buildTimelineSteps(indent) {
       isRejection: true,
       reason
     });
-    // Stops after HOD step when rejected
     return steps;
   }
 
@@ -175,15 +174,15 @@ export default function StatusTimeline({ indent }) {
   const getTitleColor = (state) => {
     switch (state) {
       case 'done':
-        return '#4ade80';
+        return colors.successLight;
       case 'current':
-        return '#38bdf8';
+        return colors.primaryLight;
       case 'rejected':
       case 'cancelled':
-        return '#f87171';
+        return colors.dangerLight;
       case 'pending':
       default:
-        return '#94a3b8';
+        return colors.textMuted;
     }
   };
 
@@ -281,8 +280,8 @@ export default function StatusTimeline({ indent }) {
 
 const styles = StyleSheet.create({
   container: {
-    paddingVertical: 8,
-    paddingHorizontal: 4
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.xs
   },
   stepRow: {
     flexDirection: 'row',
@@ -291,38 +290,38 @@ const styles = StyleSheet.create({
   leftCol: {
     alignItems: 'center',
     width: 24,
-    marginRight: 10
+    marginRight: spacing.md
   },
   dotBase: {
-    width: 20,
-    height: 20,
-    borderRadius: 10,
+    width: 22,
+    height: 22,
+    borderRadius: radii.full,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 2
   },
   dotDone: {
-    backgroundColor: '#15803d',
+    backgroundColor: colors.success,
     borderWidth: 1,
-    borderColor: '#4ade80'
+    borderColor: colors.successLight
   },
   dotCurrent: {
-    backgroundColor: '#0284c7',
+    backgroundColor: colors.info,
     borderWidth: 1,
-    borderColor: '#38bdf8'
+    borderColor: colors.infoLight
   },
   dotPending: {
-    backgroundColor: '#1e293b',
+    backgroundColor: colors.card,
     borderWidth: 1,
-    borderColor: '#475569'
+    borderColor: colors.neutral
   },
   dotRejected: {
-    backgroundColor: '#991b1b',
+    backgroundColor: colors.danger,
     borderWidth: 1,
-    borderColor: '#ef4444'
+    borderColor: colors.dangerLight
   },
   dotIcon: {
-    color: '#fff',
+    color: '#ffffff',
     fontSize: 10,
     fontWeight: '700'
   },
@@ -334,106 +333,106 @@ const styles = StyleSheet.create({
     marginBottom: 2
   },
   lineDone: {
-    backgroundColor: '#15803d'
+    backgroundColor: colors.success
   },
   linePending: {
-    backgroundColor: '#334155'
+    backgroundColor: colors.border
   },
   rightCol: {
     flex: 1,
-    paddingBottom: 16
+    paddingBottom: spacing.lg
   },
   rightColLast: {
-    paddingBottom: 4
+    paddingBottom: spacing.xs
   },
   headerRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     flexWrap: 'wrap',
-    gap: 4
+    gap: spacing.xs
   },
   stepTitle: {
-    fontSize: 13,
+    fontSize: typography.sm,
     fontWeight: '700'
   },
   timestamp: {
-    fontSize: 11,
-    color: '#64748b'
+    fontSize: typography.xs,
+    color: colors.textDim
   },
   whoText: {
-    color: '#cbd5e1',
-    fontSize: 12,
+    color: colors.textSecondary,
+    fontSize: typography.sm - 1,
     fontWeight: '500',
-    marginTop: 2
+    marginTop: spacing.xxs
   },
   subtext: {
-    color: '#94a3b8',
-    fontSize: 11,
-    marginTop: 2,
-    lineHeight: 15
+    color: colors.textMuted,
+    fontSize: typography.xs,
+    marginTop: spacing.xxs,
+    lineHeight: 16
   },
   issuedItemsCard: {
-    backgroundColor: '#0f172a',
-    borderRadius: 6,
-    padding: 8,
-    marginTop: 6,
+    backgroundColor: colors.backgroundElevated,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    marginTop: spacing.sm,
     borderWidth: 1,
-    borderColor: '#1e293b'
+    borderColor: colors.border
   },
   issuedSummaryRow: {
-    marginBottom: 4
+    marginBottom: spacing.xs
   },
   issuedBadge: {
-    fontSize: 10,
+    fontSize: typography.xs - 1,
     fontWeight: '700',
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    borderRadius: 4,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xxs,
+    borderRadius: radii.xs,
     alignSelf: 'flex-start'
   },
   badgeFull: {
-    backgroundColor: '#052e16',
-    color: '#4ade80'
+    backgroundColor: colors.successSubtle,
+    color: colors.successLight
   },
   badgePartial: {
-    backgroundColor: '#451a03',
-    color: '#fbbf24'
+    backgroundColor: colors.warningSubtle,
+    color: colors.warningLight
   },
   issuedItemLine: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    paddingVertical: 1
+    paddingVertical: 2
   },
   itemName: {
-    color: '#94a3b8',
-    fontSize: 11
+    color: colors.textMuted,
+    fontSize: typography.xs
   },
   itemQty: {
-    color: '#cbd5e1',
-    fontSize: 11,
+    color: colors.textSecondary,
+    fontSize: typography.xs,
     fontWeight: '600'
   },
   itemQtyShort: {
-    color: '#fbbf24'
+    color: colors.warningLight
   },
   rejectionBox: {
-    backgroundColor: '#450a0a',
-    borderRadius: 6,
-    padding: 8,
-    marginTop: 6,
+    backgroundColor: colors.dangerSubtle,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    marginTop: spacing.sm,
     borderLeftWidth: 3,
-    borderLeftColor: '#ef4444'
+    borderLeftColor: colors.danger
   },
   rejectionTitle: {
-    color: '#f87171',
-    fontSize: 10,
+    color: colors.dangerLight,
+    fontSize: typography.xs - 1,
     fontWeight: '700',
     textTransform: 'uppercase'
   },
   rejectionText: {
-    color: '#fca5a5',
-    fontSize: 12,
-    marginTop: 2
+    color: colors.textPrimary,
+    fontSize: typography.xs,
+    marginTop: spacing.xxs
   }
 });
