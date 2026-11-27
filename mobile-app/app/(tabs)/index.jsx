@@ -1,8 +1,19 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ScrollView, RefreshControl } from 'react-native';
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ScrollView,
+  RefreshControl
+} from 'react-native';
 import { useRouter } from 'expo-router';
 import { getSecureToken } from '../../src/auth/storage';
 import client from '../../src/api/client';
+import { colors, radii, spacing, typography } from '../../src/theme';
+import Card from '../../src/components/Card';
+import StatusBadge from '../../src/components/StatusBadge';
+import PrimaryButton from '../../src/components/PrimaryButton';
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -56,94 +67,165 @@ export default function HomeScreen() {
     setRefreshing(false);
   };
 
+  const getGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour < 12) return 'Good morning,';
+    if (hour < 17) return 'Good afternoon,';
+    return 'Good evening,';
+  };
+
   const isHod = user?.role === 'hod';
   const isAdmin = user?.role === 'admin';
 
   return (
     <ScrollView
       style={styles.container}
-      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor="#38bdf8" />}>
+      contentContainerStyle={styles.contentContainer}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={onRefresh}
+          tintColor={colors.primaryLight}
+        />
+      }>
       {/* Welcome Card */}
-      <View style={styles.welcomeCard}>
+      <Card style={styles.welcomeCard}>
         <View style={styles.welcomeHeaderRow}>
-          <View>
-            <Text style={styles.greeting}>Welcome back,</Text>
+          <View style={styles.welcomeTextGroup}>
+            <Text style={styles.greeting}>{getGreeting()}</Text>
             <Text style={styles.userName}>{user?.name || 'Staff Member'}</Text>
           </View>
-          <View style={[styles.roleBadge, isHod && styles.roleBadgeHod, isAdmin && styles.roleBadgeAdmin]}>
+          <View
+            style={[
+              styles.roleBadge,
+              isHod && styles.roleBadgeHod,
+              isAdmin && styles.roleBadgeAdmin
+            ]}>
             <Text style={styles.roleBadgeText}>
               {user?.role ? user.role.toUpperCase() : 'MEMBER'}
             </Text>
           </View>
         </View>
-        <Text style={styles.deptText}>
-          {user?.department || 'Department'} &bull; ID: {user?.staffId}
-        </Text>
-      </View>
 
-      {/* Role-Specific Card for HOD */}
-      {(isHod || isAdmin) && (
-        <View style={styles.hodSection}>
-          <View style={styles.hodCard}>
-            <View style={styles.hodCardHeader}>
-              <View>
-                <Text style={styles.hodTitle}>Department Approvals</Text>
-                <Text style={styles.hodSub}>Requisitions awaiting your review</Text>
-              </View>
-              <View style={styles.countBadge}>
-                <Text style={styles.countText}>{pendingApprovalsCount}</Text>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={styles.hodActionBtn}
-              onPress={() => router.push('/(tabs)/approvals')}>
-              <Text style={styles.hodActionText}>
-                {pendingApprovalsCount > 0 ? `Review ${pendingApprovalsCount} Pending Request(s) \u2192` : 'Open Approvals Queue \u2192'}
-              </Text>
-            </TouchableOpacity>
-          </View>
+        <View style={styles.deptRow}>
+          <Text style={styles.deptIcon}>🏛️</Text>
+          <Text style={styles.deptText}>
+            {user?.department || 'Department'} &bull; Staff ID: {user?.staffId || 'N/A'}
+          </Text>
         </View>
+      </Card>
+
+      {/* Role-Specific HOD Pending Approvals Banner */}
+      {(isHod || isAdmin) && (
+        <Card
+          style={styles.hodCard}
+          activeBorder={pendingApprovalsCount > 0 ? colors.warning : colors.border}
+          onPress={() => router.push('/(tabs)/approvals')}>
+          <View style={styles.hodCardHeader}>
+            <View style={{ flex: 1 }}>
+              <Text style={styles.hodTitle}>Department Approvals</Text>
+              <Text style={styles.hodSub}>Requisitions awaiting your review</Text>
+            </View>
+            <View style={[styles.countBadge, pendingApprovalsCount > 0 && styles.countBadgeActive]}>
+              <Text style={styles.countText}>{pendingApprovalsCount}</Text>
+            </View>
+          </View>
+
+          <View style={styles.hodLinkRow}>
+            <Text style={styles.hodActionText}>
+              {pendingApprovalsCount > 0
+                ? `Review ${pendingApprovalsCount} Pending Request(s) →`
+                : 'Open Approvals Queue →'}
+            </Text>
+          </View>
+        </Card>
       )}
 
       {/* Quick Action: New Requisition */}
-      <TouchableOpacity 
-        style={styles.actionButton}
+      <Card
+        style={styles.actionCard}
         onPress={() => router.push('/(tabs)/new-request')}>
-        <Text style={styles.actionButtonText}>+ Create New Requisition</Text>
-        <Text style={styles.actionButtonSub}>Order paper, pens, files & stationery</Text>
-      </TouchableOpacity>
+        <View style={styles.actionCardRow}>
+          <View style={styles.actionIconCircle}>
+            <Text style={styles.actionIconText}>✍️</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.actionTitle}>Create New Requisition</Text>
+            <Text style={styles.actionSubtitle}>
+              Request paper, pens, files, lab stationery & supplies
+            </Text>
+          </View>
+          <Text style={styles.actionArrow}>→</Text>
+        </View>
+      </Card>
 
       {/* Requisition Status Section */}
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>My Latest Requisition</Text>
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>My Latest Requisition</Text>
+          {recentIndent && (
+            <TouchableOpacity onPress={() => router.push('/(tabs)/history')}>
+              <Text style={styles.viewAllText}>View All →</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         {recentIndent ? (
-          <View style={styles.indentCard}>
-            <View style={styles.indentRow}>
-              <Text style={styles.indentNo}>{recentIndent.indentNo}</Text>
-              <View style={[styles.badge, styles['badge_' + recentIndent.status.toLowerCase()]]}>
-                <Text style={[styles.badgeStatusText, styles['text_' + recentIndent.status.toLowerCase()]]}>
-                  {recentIndent.status}
+          <Card
+            style={styles.indentCard}
+            onPress={() => router.push('/(tabs)/history')}>
+            <View style={styles.indentHeaderRow}>
+              <View>
+                <Text style={styles.indentNo}>{recentIndent.indentNo}</Text>
+                <Text style={styles.indentDate}>
+                  {new Date(recentIndent.createdAt).toLocaleDateString('en-GB', {
+                    day: 'numeric',
+                    month: 'short',
+                    year: 'numeric'
+                  })}
                 </Text>
               </View>
+              <StatusBadge status={recentIndent.status} />
             </View>
-            <Text style={styles.indentDate}>{new Date(recentIndent.createdAt).toLocaleDateString()}</Text>
-            <Text style={styles.itemsSummary}>
-              {recentIndent.items?.map(i => `${i.qtyRequested}x ${i.nameSnapshot}`).join(', ')}
-            </Text>
-          </View>
+
+            <View style={styles.itemsSummaryBox}>
+              <Text style={styles.itemsSummaryLabel}>Requested Items:</Text>
+              <Text style={styles.itemsSummaryText} numberOfLines={2}>
+                {recentIndent.items?.map((i) => `${i.qtyRequested}x ${i.nameSnapshot}`).join(', ') || 'No items listed'}
+              </Text>
+            </View>
+          </Card>
         ) : (
-          <View style={styles.emptyCard}>
+          <Card style={styles.emptyCard}>
+            <Text style={styles.emptyIcon}>📦</Text>
             <Text style={styles.emptyText}>No recent requisitions placed.</Text>
-          </View>
+            <PrimaryButton
+              title="+ Place First Requisition"
+              onPress={() => router.push('/(tabs)/new-request')}
+              variant="outline"
+              style={styles.emptyActionBtn}
+            />
+          </Card>
         )}
       </View>
 
-      {/* Info Card */}
-      <View style={styles.infoBox}>
-        <Text style={styles.infoTitle}>Biometric Paperless System</Text>
-        <Text style={styles.infoDesc}>
-          Requisitions are digitally authenticated with your phone's fingerprint sensor. Approved items can be collected directly from the central store counter.
+      {/* Urgent Request Hint Banner */}
+      <Card style={styles.urgentHintCard}>
+        <View style={styles.urgentHintRow}>
+          <Text style={styles.urgentHintIcon}>⚡</Text>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.urgentHintTitle}>Need Supplies Urgently?</Text>
+            <Text style={styles.urgentHintDesc}>
+              For emergency examinations or laboratory sessions, select Urgent in Step 2 of the requisition form. Urgent requests receive express priority review.
+            </Text>
+          </View>
+        </View>
+      </Card>
+
+      {/* System Security Notice */}
+      <View style={styles.securityBox}>
+        <Text style={styles.securityText}>
+          🔒 Institutional Device Security: All submissions are authenticated with your hardware screen lock or biometric fingerprint.
         </Text>
       </View>
     </ScrollView>
@@ -151,91 +233,270 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#090d16', padding: 16 },
+  container: {
+    flex: 1,
+    backgroundColor: colors.background
+  },
+  contentContainer: {
+    padding: spacing.lg,
+    paddingBottom: spacing.xxxl
+  },
   welcomeCard: {
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 20,
-    marginBottom: 16,
-    borderWidth: 1,
-    borderColor: '#334155'
+    padding: spacing.xl,
+    marginBottom: spacing.md
   },
   welcomeHeaderRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start'
   },
-  greeting: { color: '#94a3b8', fontSize: 13 },
-  userName: { color: '#fff', fontSize: 20, fontWeight: '700', marginTop: 2 },
-  roleBadge: {
-    backgroundColor: '#334155',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderRadius: 6
+  welcomeTextGroup: {
+    flex: 1
   },
-  roleBadgeHod: { backgroundColor: '#78350f', borderWidth: 1, borderColor: '#d97706' },
-  roleBadgeAdmin: { backgroundColor: '#1e3a8a', borderWidth: 1, borderColor: '#3b82f6' },
-  roleBadgeText: { color: '#f8fafc', fontSize: 11, fontWeight: '700' },
-  deptText: { color: '#38bdf8', fontSize: 13, marginTop: 6, fontWeight: '500' },
-  hodSection: { marginBottom: 16 },
-  hodCard: {
-    backgroundColor: '#1e293b',
-    borderRadius: 12,
-    padding: 16,
+  greeting: {
+    color: colors.textMuted,
+    fontSize: typography.sm
+  },
+  userName: {
+    color: colors.text,
+    fontSize: typography.xl,
+    fontWeight: '800',
+    marginTop: spacing.xxs
+  },
+  roleBadge: {
+    backgroundColor: colors.cardHover,
+    paddingHorizontal: spacing.sm,
+    paddingVertical: spacing.xs,
+    borderRadius: radii.xs,
     borderWidth: 1,
-    borderColor: '#b45309',
-    backgroundColor: '#181e2e'
+    borderColor: colors.border
+  },
+  roleBadgeHod: {
+    backgroundColor: colors.warningSubtle,
+    borderColor: colors.warningBorder
+  },
+  roleBadgeAdmin: {
+    backgroundColor: colors.primarySubtle,
+    borderColor: colors.primary
+  },
+  roleBadgeText: {
+    color: colors.textPrimary,
+    fontSize: typography.xs,
+    fontWeight: '700'
+  },
+  deptRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: spacing.md
+  },
+  deptIcon: {
+    fontSize: 14,
+    marginRight: spacing.xs
+  },
+  deptText: {
+    color: colors.primaryLight,
+    fontSize: typography.sm,
+    fontWeight: '600'
+  },
+
+  // HOD card
+  hodCard: {
+    backgroundColor: colors.backgroundElevated,
+    borderColor: colors.warningBorder,
+    marginBottom: spacing.md
   },
   hodCardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12
+    marginBottom: spacing.sm
   },
-  hodTitle: { color: '#fbbf24', fontSize: 16, fontWeight: '700' },
-  hodSub: { color: '#94a3b8', fontSize: 12, marginTop: 2 },
+  hodTitle: {
+    color: colors.warningLight,
+    fontSize: typography.md,
+    fontWeight: '700'
+  },
+  hodSub: {
+    color: colors.textMuted,
+    fontSize: typography.xs,
+    marginTop: 2
+  },
   countBadge: {
-    backgroundColor: '#b45309',
-    width: 32,
+    backgroundColor: colors.border,
+    minWidth: 32,
     height: 32,
-    borderRadius: 16,
+    borderRadius: radii.full,
+    alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: spacing.sm
+  },
+  countBadgeActive: {
+    backgroundColor: colors.warning
+  },
+  countText: {
+    color: '#ffffff',
+    fontSize: typography.sm,
+    fontWeight: '800'
+  },
+  hodLinkRow: {
+    marginTop: spacing.xs,
+    paddingTop: spacing.xs,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle
+  },
+  hodActionText: {
+    color: colors.primaryLight,
+    fontSize: typography.sm,
+    fontWeight: '600'
+  },
+
+  // Action card
+  actionCard: {
+    backgroundColor: colors.primarySubtle,
+    borderColor: colors.primary,
+    marginBottom: spacing.lg
+  },
+  actionCardRow: {
+    flexDirection: 'row',
     alignItems: 'center'
   },
-  countText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  hodActionBtn: {
-    backgroundColor: '#d97706',
-    borderRadius: 8,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    alignItems: 'center'
+  actionIconCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: radii.full,
+    backgroundColor: colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: spacing.md
   },
-  hodActionText: { color: '#fff', fontSize: 14, fontWeight: '700' },
-  actionButton: { backgroundColor: '#2563eb', borderRadius: 12, padding: 18, marginBottom: 20 },
-  actionButtonText: { color: '#fff', fontSize: 16, fontWeight: '700' },
-  actionButtonSub: { color: '#bfdbfe', fontSize: 12, marginTop: 2 },
-  section: { marginBottom: 20 },
-  sectionTitle: { color: '#cbd5e1', fontSize: 15, fontWeight: '600', marginBottom: 10 },
-  indentCard: { backgroundColor: '#1e293b', padding: 16, borderRadius: 10, borderWidth: 1, borderColor: '#334155' },
-  indentRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  indentNo: { color: '#fff', fontWeight: '700', fontSize: 15 },
-  indentDate: { color: '#64748b', fontSize: 12, marginVertical: 4 },
-  itemsSummary: { color: '#94a3b8', fontSize: 13, marginTop: 4 },
-  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6 },
-  badgeStatusText: { fontSize: 11, fontWeight: '700' },
-  badge_requested: { backgroundColor: '#451a03' },
-  text_requested: { color: '#fbbf24' },
-  badge_approved: { backgroundColor: '#1e3a8a' },
-  text_approved: { color: '#60a5fa' },
-  badge_issued: { backgroundColor: '#052e16' },
-  text_issued: { color: '#4ade80' },
-  badge_rejected: { backgroundColor: '#450a0a' },
-  text_rejected: { color: '#f87171' },
-  badge_cancelled: { backgroundColor: '#1e293b' },
-  text_cancelled: { color: '#94a3b8' },
-  emptyCard: { backgroundColor: '#1e293b', padding: 20, borderRadius: 8, alignItems: 'center' },
-  emptyText: { color: '#64748b', fontSize: 13 },
-  infoBox: { backgroundColor: '#0f172a', borderWidth: 1, borderColor: '#1e293b', padding: 16, borderRadius: 10 },
-  infoTitle: { color: '#38bdf8', fontSize: 13, fontWeight: '600', marginBottom: 4 },
-  infoDesc: { color: '#94a3b8', fontSize: 12, lineHeight: 18 }
+  actionIconText: {
+    fontSize: 20
+  },
+  actionTitle: {
+    color: colors.text,
+    fontSize: typography.md,
+    fontWeight: '700'
+  },
+  actionSubtitle: {
+    color: colors.textSecondary,
+    fontSize: typography.xs,
+    marginTop: 2
+  },
+  actionArrow: {
+    color: colors.primaryLight,
+    fontSize: typography.xl,
+    fontWeight: '700',
+    marginLeft: spacing.sm
+  },
+
+  // Section
+  section: {
+    marginBottom: spacing.lg
+  },
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.sm
+  },
+  sectionTitle: {
+    color: colors.text,
+    fontSize: typography.md,
+    fontWeight: '700'
+  },
+  viewAllText: {
+    color: colors.primaryLight,
+    fontSize: typography.sm,
+    fontWeight: '600'
+  },
+  indentCard: {
+    marginBottom: 0
+  },
+  indentHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+    marginBottom: spacing.sm
+  },
+  indentNo: {
+    color: colors.text,
+    fontSize: typography.md,
+    fontWeight: '700'
+  },
+  indentDate: {
+    color: colors.textDim,
+    fontSize: typography.xs,
+    marginTop: 2
+  },
+  itemsSummaryBox: {
+    backgroundColor: colors.backgroundElevated,
+    borderRadius: radii.sm,
+    padding: spacing.sm,
+    marginTop: spacing.xs
+  },
+  itemsSummaryLabel: {
+    color: colors.textMuted,
+    fontSize: typography.xs,
+    fontWeight: '600',
+    marginBottom: 2
+  },
+  itemsSummaryText: {
+    color: colors.textSecondary,
+    fontSize: typography.sm
+  },
+  emptyCard: {
+    alignItems: 'center',
+    paddingVertical: spacing.xl
+  },
+  emptyIcon: {
+    fontSize: 32,
+    marginBottom: spacing.xs
+  },
+  emptyText: {
+    color: colors.textMuted,
+    fontSize: typography.sm,
+    marginBottom: spacing.md
+  },
+  emptyActionBtn: {
+    minWidth: 190
+  },
+
+  // Urgent hint card
+  urgentHintCard: {
+    backgroundColor: colors.dangerSubtle,
+    borderColor: colors.dangerBorder,
+    marginBottom: spacing.md
+  },
+  urgentHintRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start'
+  },
+  urgentHintIcon: {
+    fontSize: 22,
+    marginRight: spacing.md,
+    marginTop: 2
+  },
+  urgentHintTitle: {
+    color: colors.dangerLight,
+    fontSize: typography.sm,
+    fontWeight: '700',
+    marginBottom: 2
+  },
+  urgentHintDesc: {
+    color: colors.textSecondary,
+    fontSize: typography.xs,
+    lineHeight: 16
+  },
+
+  // Security Box
+  securityBox: {
+    paddingHorizontal: spacing.sm,
+    paddingTop: spacing.xs
+  },
+  securityText: {
+    color: colors.textDim,
+    fontSize: typography.xs,
+    textAlign: 'center',
+    lineHeight: 16
+  }
 });

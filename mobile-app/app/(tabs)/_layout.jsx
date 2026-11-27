@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { View } from 'react-native';
 import { Tabs } from 'expo-router';
 import { getSecureToken } from '../../src/auth/storage';
+import { colors } from '../../src/theme';
 
 export default function TabLayout() {
   const [ready, setReady] = useState(false);
@@ -29,18 +30,18 @@ export default function TabLayout() {
   }, []);
 
   if (!ready) {
-    return <View style={{ flex: 1, backgroundColor: '#0f172a' }} />;
+    return <View style={{ flex: 1, backgroundColor: colors.background }} />;
   }
 
   const isHodOrAdmin = role === 'hod' || role === 'admin';
 
   return (
     <Tabs screenOptions={{
-      headerStyle: { backgroundColor: '#0f172a' },
-      headerTintColor: '#fff',
-      tabBarStyle: { backgroundColor: '#0f172a', borderTopColor: '#1e293b' },
-      tabBarActiveTintColor: '#38bdf8',
-      tabBarInactiveTintColor: '#64748b'
+      headerStyle: { backgroundColor: colors.backgroundElevated },
+      headerTintColor: colors.text,
+      tabBarStyle: { backgroundColor: colors.backgroundElevated, borderTopColor: colors.border },
+      tabBarActiveTintColor: colors.primaryLight,
+      tabBarInactiveTintColor: colors.textDim
     }}>
       <Tabs.Screen 
         name="index" 

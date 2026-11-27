@@ -1,9 +1,11 @@
 import React, { useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, Alert, Platform } from 'react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import client from '../src/api/client';
 import { authenticateBiometrics } from '../src/biometrics/confirm';
 import { getInstallationDeviceId } from '../src/auth/deviceId';
+import { colors, spacing, radii, radius } from '../src/theme';
+import PrimaryButton from '../src/components/PrimaryButton';
 
 export default function ConfirmScreen() {
   const router = useRouter();
@@ -14,6 +16,10 @@ export default function ConfirmScreen() {
   const remarks = params.remarks || '';
 
   const handleBiometricConfirm = async () => {
+    if (Platform.OS === 'web') {
+      Alert.alert('Not Supported', 'Fingerprint confirmation is only available in the mobile app');
+      return;
+    }
     setLoading(true);
     try {
       const authResult = await authenticateBiometrics('Touch fingerprint sensor to confirm your stationery indent');
@@ -80,24 +86,25 @@ export default function ConfirmScreen() {
 
         <View style={styles.authBox}>
           <Text style={styles.authNotice}>
-            Pressing below activates your device fingerprint sensor or screen lock to create an encrypted digital signature.
+            {Platform.OS === 'web'
+              ? 'Fingerprint confirmation is only available in the mobile app'
+              : 'Pressing below activates your device fingerprint sensor or screen lock to create an encrypted digital signature.'}
           </Text>
 
-          <TouchableOpacity
-            style={[styles.confirmBtn, loading && styles.btnDisabled]}
+          <PrimaryButton
+            title="Touch Fingerprint to Sign"
+            variant="success"
             onPress={handleBiometricConfirm}
-            disabled={loading}>
-            {loading ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.confirmBtnText}>Touch Fingerprint to Sign</Text>
-            )}
-          </TouchableOpacity>
+            loading={loading}
+            disabled={Platform.OS === 'web' || loading}
+            style={{ marginBottom: spacing.md }}
+          />
 
           <TouchableOpacity
             style={styles.cancelBtn}
             onPress={() => router.back()}
-            disabled={loading}>
+            disabled={loading}
+            accessibilityRole="button">
             <Text style={styles.cancelBtnText}>Back / Modify Items</Text>
           </TouchableOpacity>
         </View>
@@ -107,22 +114,19 @@ export default function ConfirmScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#090d16', padding: 16, justifyContent: 'center' },
-  card: { backgroundColor: '#1e293b', borderRadius: 14, padding: 20, borderWidth: 1, borderColor: '#334155' },
-  title: { color: '#fff', fontSize: 18, fontWeight: '700' },
-  subtitle: { color: '#94a3b8', fontSize: 13, marginTop: 4, marginBottom: 16 },
-  itemsList: { borderTopWidth: 1, borderTopColor: '#334155', paddingTop: 12, marginBottom: 16 },
+  container: { flex: 1, backgroundColor: colors.background, padding: spacing.lg, justifyContent: 'center' },
+  card: { backgroundColor: colors.card, borderRadius: radii.lg, padding: spacing.xl, borderWidth: 1, borderColor: colors.border },
+  title: { color: colors.text, fontSize: 18, fontWeight: '700' },
+  subtitle: { color: colors.textMuted, fontSize: 13, marginTop: 4, marginBottom: spacing.lg },
+  itemsList: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.md, marginBottom: spacing.lg },
   itemRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
-  itemName: { color: '#cbd5e1', fontSize: 14, fontWeight: '500' },
-  itemQty: { color: '#38bdf8', fontSize: 14, fontWeight: '700' },
-  remarksBox: { backgroundColor: '#0f172a', padding: 12, borderRadius: 8, marginBottom: 16 },
-  remarksLabel: { color: '#64748b', fontSize: 11, fontWeight: '600', marginBottom: 2 },
-  remarksText: { color: '#e2e8f0', fontSize: 13 },
-  authBox: { borderTopWidth: 1, borderTopColor: '#334155', paddingTop: 16 },
-  authNotice: { color: '#94a3b8', fontSize: 12, textAlign: 'center', lineHeight: 18, marginBottom: 16 },
-  confirmBtn: { backgroundColor: '#16a34a', borderRadius: 10, padding: 16, alignItems: 'center', marginBottom: 10 },
-  btnDisabled: { opacity: 0.7 },
-  confirmBtnText: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  cancelBtn: { padding: 10, alignItems: 'center' },
-  cancelBtnText: { color: '#94a3b8', fontSize: 13 }
+  itemName: { color: colors.text, fontSize: 14, fontWeight: '500' },
+  itemQty: { color: colors.primaryLight, fontSize: 14, fontWeight: '700' },
+  remarksBox: { backgroundColor: colors.backgroundElevated, padding: spacing.md, borderRadius: radii.md, marginBottom: spacing.lg },
+  remarksLabel: { color: colors.textDim, fontSize: 11, fontWeight: '600', marginBottom: 2 },
+  remarksText: { color: colors.text, fontSize: 13 },
+  authBox: { borderTopWidth: 1, borderTopColor: colors.border, paddingTop: spacing.lg },
+  authNotice: { color: colors.textMuted, fontSize: 12, textAlign: 'center', lineHeight: 18, marginBottom: spacing.lg },
+  cancelBtn: { padding: spacing.sm, alignItems: 'center', minHeight: 44, justifyContent: 'center' },
+  cancelBtnText: { color: colors.textMuted, fontSize: 13 }
 });

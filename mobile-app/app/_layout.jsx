@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Stack, useRouter, useSegments } from 'expo-router';
 import { View, ActivityIndicator, StyleSheet, Alert } from 'react-native';
 import { getSecureToken, deleteSecureToken } from '../src/auth/storage';
+import { colors } from '../src/theme';
 
 export default function RootLayout() {
   const [loading, setLoading] = useState(true);
@@ -66,7 +67,7 @@ export default function RootLayout() {
   if (loading) {
     return (
       <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color="#38bdf8" />
+        <ActivityIndicator size="large" color={colors.primaryLight} />
       </View>
     );
   }
@@ -75,7 +76,16 @@ export default function RootLayout() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="login" />
       <Stack.Screen name="(tabs)" />
-      <Stack.Screen name="confirm" options={{ presentation: 'modal', headerShown: true, title: 'Confirm Requisition' }} />
+      <Stack.Screen
+        name="confirm"
+        options={{
+          presentation: 'modal',
+          headerShown: true,
+          title: 'Confirm Requisition',
+          headerStyle: { backgroundColor: colors.backgroundElevated },
+          headerTintColor: colors.text
+        }}
+      />
     </Stack>
   );
 }
@@ -83,7 +93,7 @@ export default function RootLayout() {
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
-    backgroundColor: '#0f172a',
+    backgroundColor: colors.background,
     justifyContent: 'center',
     alignItems: 'center'
   }
