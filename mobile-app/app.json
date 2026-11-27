@@ -3,6 +3,10 @@
     "name": "Stationery Indent",
     "slug": "stationery-indent",
     "version": "1.0.0",
+    "platforms": [
+      "ios",
+      "android"
+    ],
     "scheme": "stationeryindent",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
