@@ -1,4 +1,5 @@
 const bcrypt = require('bcryptjs');
+const mongoose = require('mongoose');
 const { isConnected } = require('../config/db');
 const User = require('../models/User');
 const { mem } = require('../services/store');
@@ -121,31 +122,60 @@ exports.updateUser = async (req, res, next) => {
 exports.approveDevice = async (req, res, next) => {
   try {
     const { id, deviceId } = req.params;
-    const { approved } = req.body;
+    const { approved } = req.body || {};
+
+    const cleanUserId = id ? String(id).trim() : '';
+    const cleanDeviceId = deviceId ? String(deviceId).trim() : '';
+
+    if (!cleanUserId || (isConnected() && !mongoose.Types.ObjectId.isValid(cleanUserId))) {
+      return res.status(400).json({ message: 'Invalid user ID format' });
+    }
+
+    if (!cleanDeviceId) {
+      return res.status(400).json({ message: 'Valid deviceId is required' });
+    }
+
+    if (approved !== undefined && typeof approved !== 'boolean') {
+      return res.status(400).json({ message: 'approved must be a boolean' });
+    }
+
+    const nextApproved = approved === undefined ? true : approved;
 
     let user = null;
     if (isConnected()) {
-      user = await User.findById(id);
+      user = await User.findById(cleanUserId);
     } else {
-      user = mem.users.find(u => u._id === id);
+      user = mem.users.find(u => u._id === cleanUserId);
     }
 
     if (!user) return res.status(404).json({ message: 'User not found' });
 
-    const device = user.devices?.find(d => d.deviceId === deviceId);
+    const device = Array.isArray(user.devices)
+      ? user.devices.find(d => d.deviceId === cleanDeviceId)
+      : null;
     if (!device) return res.status(404).json({ message: 'Device not found on user record' });
 
-    device.approved = Boolean(approved);
+    device.approved = nextApproved;
     if (isConnected()) await user.save();
 
     await logAction({
       actorId: req.user._id,
       action: 'DEVICE_APPROVAL_CHANGE',
-      details: { targetUserId: id, deviceId, approved: device.approved },
+      details: { targetUserId: cleanUserId, deviceId: cleanDeviceId, approved: device.approved },
       req
     });
 
-    res.json({ data: { message: `Device ${device.approved ? 'approved' : 'revoked'}`, device } });
+    res.json({
+      data: {
+        message: `Device ${device.approved ? 'approved' : 'revoked'}`,
+        device: {
+          deviceId: device.deviceId,
+          label: device.label,
+          approved: device.approved,
+          registeredAt: device.registeredAt
+        }
+      }
+    });
   } catch (err) {
     next(err);
   }

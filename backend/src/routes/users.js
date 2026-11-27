@@ -8,6 +8,7 @@ router.get('/', protect, allow('admin'), usersController.getUsers);
 router.post('/', protect, allow('admin'), usersController.createUser);
 router.patch('/:id', protect, allow('admin'), usersController.updateUser);
 router.patch('/:id/devices/:deviceId', protect, allow('admin'), usersController.approveDevice);
+router.patch('/:id/devices/:deviceId/approve', protect, allow('admin'), usersController.approveDevice);
 router.post('/:id/reset-password', protect, allow('admin'), usersController.resetPassword);
 
 module.exports = router;

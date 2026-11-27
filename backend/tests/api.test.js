@@ -451,4 +451,296 @@ test('Stationery Indent Backend API - End-to-End Suite', async (t) => {
       .send({ remarks: 'Attempt to issue rejected' });
     assert.strictEqual(issueRejectedRes.statusCode, 400);
   });
+
+  await t.test('18. Indent Optional Fields - Structured, Legacy Remarks, Validation & Precedence', async () => {
+    // 18a: Valid structured fields with normalization
+    const structuredRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        confirmation: { method: 'biometric', deviceId: 'dev-phone-aditya' },
+        urgency: '  urgent ',
+        neededWithin: ' 2 days ',
+        neededBy: '28 Nov 2026',
+        purpose: '  Mid-term exam printing  ',
+        notes: '  Deliver to Room 302  ',
+        remarks: 'Original custom remarks'
+      });
+    assert.strictEqual(structuredRes.statusCode, 201);
+    assert.strictEqual(structuredRes.body.data.urgency, 'Urgent');
+    assert.strictEqual(structuredRes.body.data.neededWithin, '2 days');
+    assert.strictEqual(structuredRes.body.data.neededBy, '2026-11-28T00:00:00.000Z');
+    assert.strictEqual(structuredRes.body.data.purpose, 'Mid-term exam printing');
+    assert.strictEqual(structuredRes.body.data.notes, 'Deliver to Room 302');
+    assert.strictEqual(structuredRes.body.data.remarks, 'Original custom remarks');
+
+    // 18b: Legacy formatted remarks parsing & preservation of original remarks
+    const legacyRemarks = 'Urgency: not_urgent | Needed by: 29 Nov 2026 (3 days) | Purpose: Lab manual | Notes: Pack separately';
+    const legacyRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        confirmation: { method: 'biometric', deviceId: 'dev-phone-aditya' },
+        remarks: legacyRemarks
+      });
+    assert.strictEqual(legacyRes.statusCode, 201);
+    assert.strictEqual(legacyRes.body.data.urgency, 'Not urgent');
+    assert.strictEqual(legacyRes.body.data.neededWithin, '3 days');
+    assert.strictEqual(legacyRes.body.data.neededBy, '2026-11-29T00:00:00.000Z');
+    assert.strictEqual(legacyRes.body.data.purpose, 'Lab manual');
+    assert.strictEqual(legacyRes.body.data.notes, 'Pack separately');
+    assert.strictEqual(legacyRes.body.data.remarks, legacyRemarks);
+
+    // 18c: Structured fields take precedence over parsed remarks
+    const precedenceRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        confirmation: { method: 'biometric', deviceId: 'dev-phone-aditya' },
+        urgency: 'Urgent',
+        purpose: 'Structured Purpose',
+        remarks: 'Urgency: Normal | Purpose: Legacy Purpose | Notes: Legacy Notes'
+      });
+    assert.strictEqual(precedenceRes.statusCode, 201);
+    assert.strictEqual(precedenceRes.body.data.urgency, 'Urgent');
+    assert.strictEqual(precedenceRes.body.data.purpose, 'Structured Purpose');
+    assert.strictEqual(precedenceRes.body.data.notes, 'Legacy Notes');
+    assert.strictEqual(precedenceRes.body.data.remarks, 'Urgency: Normal | Purpose: Legacy Purpose | Notes: Legacy Notes');
+
+    // 18d: Empty structured fields fall back to legacy remarks
+    const emptyFallbackRemarks = 'Urgency: Urgent | Needed by: 2026-12-05 (1 week) | Purpose: Exam booklets | Notes: Sealed pack';
+    const emptyFallbackRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        confirmation: { method: 'biometric', deviceId: 'dev-phone-aditya' },
+        urgency: '   ',
+        neededWithin: '',
+        neededBy: '  ',
+        purpose: '',
+        notes: '   ',
+        remarks: emptyFallbackRemarks
+      });
+    assert.strictEqual(emptyFallbackRes.statusCode, 201);
+    assert.strictEqual(emptyFallbackRes.body.data.urgency, 'Urgent');
+    assert.strictEqual(emptyFallbackRes.body.data.neededWithin, '1 week');
+    assert.strictEqual(emptyFallbackRes.body.data.neededBy, '2026-12-05T00:00:00.000Z');
+    assert.strictEqual(emptyFallbackRes.body.data.purpose, 'Exam booklets');
+    assert.strictEqual(emptyFallbackRes.body.data.notes, 'Sealed pack');
+    assert.strictEqual(emptyFallbackRes.body.data.remarks, emptyFallbackRemarks);
+
+    // 18e: Old indent without optional fields or formatted remarks still works
+    const oldCompatRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        confirmation: { method: 'biometric', deviceId: 'dev-phone-aditya' }
+      });
+    assert.strictEqual(oldCompatRes.statusCode, 201);
+    assert.strictEqual(oldCompatRes.body.data.urgency, undefined);
+    assert.strictEqual(oldCompatRes.body.data.remarks, '');
+
+    // 18f: Invalid urgency returns 400
+    const badUrgencyRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        urgency: 'SUPER_HIGH'
+      });
+    assert.strictEqual(badUrgencyRes.statusCode, 400);
+
+    // 18g: Invalid neededBy date and impossible calendar dates return 400
+    const badDateRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        neededBy: 'not-a-valid-date'
+      });
+    assert.strictEqual(badDateRes.statusCode, 400);
+
+    const impossibleIsoDateRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        neededBy: '2026-02-30'
+      });
+    assert.strictEqual(impossibleIsoDateRes.statusCode, 400);
+
+    const impossibleHumanDateRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        neededBy: '30 Feb 2026'
+      });
+    assert.strictEqual(impossibleHumanDateRes.statusCode, 400);
+
+    // 18h: Invalid non-string values for purpose, notes, and neededWithin return 400
+    const badPurposeRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        purpose: 12345
+      });
+    assert.strictEqual(badPurposeRes.statusCode, 400);
+
+    const badNotesRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        notes: { text: 'invalid' }
+      });
+    assert.strictEqual(badNotesRes.statusCode, 400);
+
+    const badNeededWithinRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        neededWithin: ['3 days']
+      });
+    assert.strictEqual(badNeededWithinRes.statusCode, 400);
+  });
+
+  await t.test('19. Phase 3 - Device Registration, Admin Approval & Indent Security', async () => {
+    // 19a: Newly registered device via /api/me/devices defaults to approved: false
+    const regRes = await request(app)
+      .post('/api/me/devices')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ deviceId: 'dev-unapproved-p3', label: 'New Pixel 9' });
+    assert.strictEqual(regRes.statusCode, 200);
+    assert.strictEqual(regRes.body.data.device.deviceId, 'dev-unapproved-p3');
+    assert.strictEqual(regRes.body.data.device.approved, false);
+
+    // 19b: Re-registering or logging in with existing unapproved device preserves approved: false
+    const dupRegRes = await request(app)
+      .post('/api/me/devices')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ deviceId: 'dev-unapproved-p3', label: 'New Pixel 9' });
+    assert.strictEqual(dupRegRes.statusCode, 200);
+    assert.strictEqual(dupRegRes.body.data.device.approved, false);
+
+    const loginWithDeviceRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'FAC101', password: 'Password@123', deviceId: 'dev-login-unapproved-p3' });
+    assert.strictEqual(loginWithDeviceRes.statusCode, 200);
+    const autoDevice = loginWithDeviceRes.body.data.user.devices.find(
+      d => d.deviceId === 'dev-login-unapproved-p3'
+    );
+    assert.ok(autoDevice);
+    assert.strictEqual(autoDevice.approved, false);
+
+    // Re-logging in with already-approved device preserves approved: true
+    const loginApprovedRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'FAC101', password: 'Password@123', deviceId: 'dev-phone-aditya' });
+    assert.strictEqual(loginApprovedRes.statusCode, 200);
+    const existingApproved = loginApprovedRes.body.data.user.devices.find(
+      d => d.deviceId === 'dev-phone-aditya'
+    );
+    assert.strictEqual(existingApproved.approved, true);
+
+    // 19c: Unknown device is rejected with 403 on indent creation
+    const unknownDeviceIndentRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        confirmation: { method: 'biometric', deviceId: 'dev-does-not-exist' }
+      });
+    assert.strictEqual(unknownDeviceIndentRes.statusCode, 403);
+
+    // 19d: Unapproved device is rejected with 403 on indent creation
+    const unapprovedDeviceIndentRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        confirmation: { method: 'biometric', deviceId: 'dev-unapproved-p3' }
+      });
+    assert.strictEqual(unapprovedDeviceIndentRes.statusCode, 403);
+
+    // 19e: Another user's approved device is rejected with 403 on indent creation
+    const foreignDeviceIndentRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        confirmation: { method: 'biometric', deviceId: 'dev-phone-meera' }
+      });
+    assert.strictEqual(foreignDeviceIndentRes.statusCode, 403);
+
+    // 19f: Non-admin cannot approve a device (403)
+    const meRes = await request(app)
+      .get('/api/me')
+      .set('Authorization', `Bearer ${facultyToken}`);
+    const facultyUserId = meRes.body.data._id;
+
+    const nonAdminApproveRes = await request(app)
+      .patch(`/api/users/${facultyUserId}/devices/dev-unapproved-p3/approve`)
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({ approved: true });
+    assert.strictEqual(nonAdminApproveRes.statusCode, 403);
+
+    const skApproveRes = await request(app)
+      .patch(`/api/users/${facultyUserId}/devices/dev-unapproved-p3/approve`)
+      .set('Authorization', `Bearer ${storekeeperToken}`)
+      .send({ approved: true });
+    assert.strictEqual(skApproveRes.statusCode, 403);
+
+    // 19g: Invalid user/device IDs & invalid body handled safely
+    const adminLoginRes = await request(app)
+      .post('/api/auth/login')
+      .send({ staffId: 'EMP001', password: 'Password@123' });
+    const adminToken = adminLoginRes.body.data.token;
+
+    const badUserRes = await request(app)
+      .patch('/api/users/nonexistent-user-id/devices/dev-unapproved-p3/approve')
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ approved: true });
+    assert.strictEqual(badUserRes.statusCode, 404);
+
+    const badDeviceRes = await request(app)
+      .patch(`/api/users/${facultyUserId}/devices/nonexistent-device-id/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ approved: true });
+    assert.strictEqual(badDeviceRes.statusCode, 404);
+
+    const badApprovedTypeRes = await request(app)
+      .patch(`/api/users/${facultyUserId}/devices/dev-unapproved-p3/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ approved: 'yes' });
+    assert.strictEqual(badApprovedTypeRes.statusCode, 400);
+
+    // 19h: Admin approves the device via PATCH /api/users/:id/devices/:deviceId/approve
+    const approveRes = await request(app)
+      .patch(`/api/users/${facultyUserId}/devices/dev-unapproved-p3/approve`)
+      .set('Authorization', `Bearer ${adminToken}`)
+      .send({ approved: true });
+    assert.strictEqual(approveRes.statusCode, 200);
+    assert.strictEqual(approveRes.body.data.device.deviceId, 'dev-unapproved-p3');
+    assert.strictEqual(approveRes.body.data.device.approved, true);
+
+    // 19i: Approved owner's device can now create an indent
+    const approvedIndentRes = await request(app)
+      .post('/api/indents')
+      .set('Authorization', `Bearer ${facultyToken}`)
+      .send({
+        items: [{ itemId: testItemId, quantity: 1 }],
+        confirmation: { method: 'biometric', deviceId: 'dev-unapproved-p3' },
+        remarks: 'Created with newly approved device'
+      });
+    assert.strictEqual(approvedIndentRes.statusCode, 201);
+    assert.strictEqual(approvedIndentRes.body.data.confirmation.deviceId, 'dev-unapproved-p3');
+  });
 });

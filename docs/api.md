@@ -212,9 +212,24 @@ Authentication is handled via Bearer JWT in the `Authorization` header:
     "method": "biometric",
     "deviceId": "dev-phone-9912"
   },
+  "urgency": "Urgent",
+  "neededBy": "2026-11-28",
+  "neededWithin": "3 days",
+  "purpose": "Exam papers printing",
+  "notes": "Handle with priority",
   "remarks": "Required for semester exam printing"
 }
 ```
+
+#### Optional Fields & Legacy Remarks Precedence:
+* **`urgency`**: Optional string (`"Urgent"`, `"Normal"`, or `"Not urgent"`, case-insensitive). Any other value is rejected with `400 Bad Request`. If omitted (and not found in legacy remarks), no urgency is stored; the admin Issue Queue displays and sorts a missing urgency as `"Normal"`.
+* **`neededBy`**: Optional target date string. Supports ISO date (`YYYY-MM-DD`), ISO datetime (`YYYY-MM-DDTHH:mm:ss.sssZ`), or human-readable format (`DD MMM YYYY`, e.g., `"28 Nov 2026"`). Impossible calendar dates (such as `2026-02-30`) are rejected with `400 Bad Request`.
+* **`neededWithin`**: Optional string expressing timeframe (e.g., `"3 days"`).
+* **`purpose`**: Optional string describing requisition purpose.
+* **`notes`**: Optional string for additional comments.
+* **Legacy Remarks Fallback**: When structured fields (`urgency`, `neededBy`, `neededWithin`, `purpose`, `notes`) are absent, undefined, or empty, the backend automatically parses legacy formatted `remarks` strings matching patterns like:
+  `"Urgency: Urgent | Needed by: 29 Nov 2026 (3 days) | Purpose: Exam | Notes: Urgent printing"`
+  Structured request fields take strict precedence over parsed remarks. Remarks are used as fallback only when the real field is absent or blank. The original `remarks` string is always preserved intact.
 * **Success Response (201 Created)**:
 ```json
 {

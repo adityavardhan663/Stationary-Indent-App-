@@ -38,9 +38,9 @@ exports.login = async (req, res, next) => {
       return res.status(401).json({ message: 'Invalid Staff ID or password' });
     }
 
-    // Auto-record device if provided
-    if (deviceId) {
-      const cleanDeviceId = String(deviceId).trim();
+    // Auto-record device if provided (defaults to unapproved; preserves existing approval)
+    if (deviceId && typeof deviceId === 'string' && deviceId.trim()) {
+      const cleanDeviceId = deviceId.trim();
       if (!Array.isArray(user.devices)) {
         user.devices = [];
       }
@@ -49,7 +49,7 @@ exports.login = async (req, res, next) => {
         const newDevice = {
           deviceId: cleanDeviceId,
           label: req.body.deviceLabel ? String(req.body.deviceLabel).trim() : 'Mobile Phone',
-          approved: true, // auto-approve for convenience in prototype
+          approved: false,
           registeredAt: new Date()
         };
         user.devices.push(newDevice);
@@ -200,7 +200,7 @@ exports.registerDevice = async (req, res, next) => {
     const newDevice = {
       deviceId: cleanDeviceId,
       label: label ? String(label).trim() : 'Mobile Phone',
-      approved: true, // Auto-approved for prototype
+      approved: false,
       registeredAt: new Date()
     };
 

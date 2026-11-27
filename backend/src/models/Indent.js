@@ -84,6 +84,25 @@ const indentSchema = new mongoose.Schema({
   issuedAt: {
     type: Date
   },
+  urgency: {
+    type: String,
+    enum: ['Urgent', 'Normal', 'Not urgent']
+  },
+  neededWithin: {
+    type: String,
+    trim: true
+  },
+  neededBy: {
+    type: Date
+  },
+  purpose: {
+    type: String,
+    trim: true
+  },
+  notes: {
+    type: String,
+    trim: true
+  },
   remarks: {
     type: String,
     trim: true
