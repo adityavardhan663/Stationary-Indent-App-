@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, FlatList, Alert } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TouchableOpacity, Alert } from 'react-native';
 import client from '../../src/api/client';
 import { getSecureToken } from '../../src/auth/storage';
 import { parseIndentDetails } from '../../src/utils/indentDetails';
+import StatusTimeline from '../../src/components/StatusTimeline';
 
 export default function HistoryScreen() {
   const [indents, setIndents] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [expandedIds, setExpandedIds] = useState({});
 
   const fetchHistory = async () => {
     const token = await getSecureToken('authToken');
@@ -27,6 +29,13 @@ export default function HistoryScreen() {
     fetchHistory();
   }, []);
 
+  const toggleExpand = (id) => {
+    setExpandedIds(prev => ({
+      ...prev,
+      [id]: !prev[id]
+    }));
+  };
+
   return (
     <View style={styles.container}>
       <FlatList
@@ -42,6 +51,7 @@ export default function HistoryScreen() {
         renderItem={({ item }) => {
           const details = parseIndentDetails(item);
           const isUrgent = details.urgency?.toLowerCase() === 'urgent';
+          const isExpanded = !!expandedIds[item._id];
 
           return (
             <View style={styles.card}>
@@ -118,6 +128,22 @@ export default function HistoryScreen() {
                   <Text style={styles.issuedText}>Collected</Text>
                 )}
               </View>
+
+              {/* Collapsible Track Request Section */}
+              <TouchableOpacity
+                style={styles.trackToggleBtn}
+                onPress={() => toggleExpand(item._id)}
+                activeOpacity={0.7}>
+                <Text style={styles.trackToggleText}>
+                  {isExpanded ? '▴ Hide Request Timeline' : '▾ Track Request Status'}
+                </Text>
+              </TouchableOpacity>
+
+              {isExpanded && (
+                <View style={styles.timelineWrapper}>
+                  <StatusTimeline indent={item} />
+                </View>
+              )}
             </View>
           );
         }}
@@ -240,6 +266,26 @@ const styles = StyleSheet.create({
   },
   confirmMethod: { color: '#94a3b8', fontSize: 11 },
   issuedText: { color: '#4ade80', fontSize: 11, fontWeight: '700' },
+  trackToggleBtn: {
+    marginTop: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    backgroundColor: '#0f172a',
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: '#334155'
+  },
+  trackToggleText: {
+    color: '#38bdf8',
+    fontSize: 12,
+    fontWeight: '700'
+  },
+  timelineWrapper: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#334155'
+  },
   emptyContainer: { padding: 40, alignItems: 'center' },
   emptyText: { color: '#64748b', fontSize: 14 }
 });
