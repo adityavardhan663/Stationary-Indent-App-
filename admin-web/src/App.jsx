@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Package,
   ClipboardList,
@@ -10,33 +10,45 @@ import {
   ShieldCheck,
   Users,
   FileText,
-  Search,
   Plus,
   Download,
   RefreshCw,
   LogOut,
   Fingerprint,
-  Printer,
-  XCircle,
-  Check,
-  Loader2,
-  Building2
+  Loader2
 } from 'lucide-react';
 import LoginPage from './components/LoginPage';
+import IssueQueue from './components/IssueQueue';
+import {
+  isAllowedDashboardRole,
+  getAllowedTabIds,
+  getDefaultTabId,
+  resolveTabForUrl,
+  UNAUTHORIZED_MESSAGE
+} from './utils/authAccess';
+import { getDeviceActionKey, updateDeviceApproval } from './utils/deviceApi';
+import {
+  normalizeIndentUrgency,
+  getUrgencyBadgeStyle,
+  formatNeededByDisplay,
+  sortIssueQueueIndents
+} from './utils/indentQueue';
 
 export default function App() {
   const [authChecked, setAuthChecked] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+  const [authError, setAuthError] = useState('');
   const [activeTab, setActiveTab] = useState('dashboard');
 
   const [items, setItems] = useState([]);
   const [indents, setIndents] = useState([]);
-  const [myIndents, setMyIndents] = useState([]);
   const [lowStock, setLowStock] = useState([]);
   const [auditLogs, setAuditLogs] = useState([]);
   const [usersList, setUsersList] = useState([]);
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState(null);
+  const [pendingDeviceKeys, setPendingDeviceKeys] = useState({});
+  const inFlightDeviceKeysRef = useRef(new Set());
 
   // Form states
   const [newItemModal, setNewItemModal] = useState(false);
@@ -46,12 +58,6 @@ export default function App() {
   const [stockInForm, setStockInForm] = useState({ itemId: '', quantity: 10, reference: 'INV-2026-901', supplier: 'Central Stationery Depot' });
   const [searchFilter, setSearchFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
-
-  // Mobile Simulator state (for testing faculty flow right inside the browser)
-  const [mobileCart, setMobileCart] = useState([]);
-  const [mobileRemarks, setMobileRemarks] = useState('');
-  const [mobileSuccessIndent, setMobileSuccessIndent] = useState(null);
-  const [biometricScanning, setBiometricScanning] = useState(false);
 
   const API_BASE = '/api';
 
@@ -68,28 +74,22 @@ export default function App() {
     };
   };
 
-  // Helper to determine allowed tabs per role
-  const getAllowedTabIds = (role) => {
-    const r = (role || '').toLowerCase();
-    if (r === 'admin') {
-      return ['dashboard', 'queue', 'items', 'stockin', 'history', 'reports', 'users', 'audit', 'mobile-sim'];
+  const clearSession = (errorMessage = '') => {
+    localStorage.removeItem('stationery_token');
+    localStorage.removeItem('stationery_user');
+    setCurrentUser(null);
+    setAuthError(errorMessage);
+    setItems([]);
+    setIndents([]);
+    setLowStock([]);
+    setAuditLogs([]);
+    setUsersList([]);
+    setPendingDeviceKeys({});
+    inFlightDeviceKeysRef.current.clear();
+    setActiveTab('dashboard');
+    if (typeof window !== 'undefined' && window.location.pathname !== '/login') {
+      window.history.replaceState(null, '', '/login');
     }
-    if (r === 'storekeeper') {
-      return ['queue', 'dashboard', 'items', 'stockin', 'history', 'reports'];
-    }
-    if (r === 'hod') {
-      return ['hod-approvals', 'history', 'items', 'mobile-sim'];
-    }
-    // faculty / staff
-    return ['mobile-sim', 'my-indents', 'items'];
-  };
-
-  const getDefaultTabId = (role) => {
-    const r = (role || '').toLowerCase();
-    if (r === 'admin') return 'dashboard';
-    if (r === 'storekeeper') return 'queue';
-    if (r === 'hod') return 'hod-approvals';
-    return 'mobile-sim';
   };
 
   // Check stored credentials on mount
@@ -97,6 +97,7 @@ export default function App() {
     const verifyStoredSession = async () => {
       const storedToken = localStorage.getItem('stationery_token');
       if (!storedToken) {
+        clearSession('');
         setAuthChecked(true);
         return;
       }
@@ -111,20 +112,29 @@ export default function App() {
 
         if (res.ok) {
           const json = await res.json();
-          if (json.data) {
+          if (json?.data?.role) {
+            if (!isAllowedDashboardRole(json.data.role)) {
+              clearSession(UNAUTHORIZED_MESSAGE);
+              return;
+            }
             const user = { ...json.data, token: storedToken };
+            const resolvedTab = resolveTabForUrl(window.location.pathname, user.role);
+            setAuthError('');
             setCurrentUser(user);
-            setActiveTab(getDefaultTabId(user.role));
+            setActiveTab(resolvedTab);
+            if (resolvedTab && window.location.pathname !== `/${resolvedTab}`) {
+              window.history.replaceState(null, '', `/${resolvedTab}`);
+            }
           } else {
-            handleLogout();
+            clearSession('');
           }
         } else {
           // Token expired or invalid
-          handleLogout();
+          clearSession('');
         }
       } catch (err) {
         console.warn('Session verification error:', err.message);
-        handleLogout();
+        clearSession('');
       } finally {
         setAuthChecked(true);
       }
@@ -135,28 +145,45 @@ export default function App() {
 
   // Login handler triggered by LoginPage
   const handleLoginSuccess = ({ token, user }) => {
+    if (!isAllowedDashboardRole(user?.role)) {
+      clearSession(UNAUTHORIZED_MESSAGE);
+      return;
+    }
+
     const userSession = { ...user, token };
     localStorage.setItem('stationery_token', token);
     localStorage.setItem('stationery_user', JSON.stringify(user));
+    const resolvedTab = resolveTabForUrl(window.location.pathname, user.role);
+    setAuthError('');
     setCurrentUser(userSession);
-    setActiveTab(getDefaultTabId(user.role));
+    setActiveTab(resolvedTab);
+    if (resolvedTab && window.location.pathname !== `/${resolvedTab}`) {
+      window.history.replaceState(null, '', `/${resolvedTab}`);
+    }
     showNotification(`Welcome, ${user.name} (${user.role.toUpperCase()})`);
   };
 
   // Logout handler
   const handleLogout = () => {
-    localStorage.removeItem('stationery_token');
-    localStorage.removeItem('stationery_user');
-    setCurrentUser(null);
-    setItems([]);
-    setIndents([]);
-    setMyIndents([]);
-    setLowStock([]);
-    setAuditLogs([]);
-    setUsersList([]);
-    setMobileCart([]);
-    setMobileSuccessIndent(null);
-    setActiveTab('dashboard');
+    clearSession('');
+  };
+
+  const navigateToTab = (tabId) => {
+    const allowed = getAllowedTabIds(currentUser?.role);
+    if (!allowed.includes(tabId)) {
+      const fallback = getDefaultTabId(currentUser?.role);
+      if (fallback) {
+        setActiveTab(fallback);
+        if (window.location.pathname !== `/${fallback}`) {
+          window.history.replaceState(null, '', `/${fallback}`);
+        }
+      }
+      return;
+    }
+    setActiveTab(tabId);
+    if (window.location.pathname !== `/${tabId}`) {
+      window.history.pushState(null, '', `/${tabId}`);
+    }
   };
 
   // Safe fetch wrapper that handles 401 unauthenticated responses
@@ -187,20 +214,11 @@ export default function App() {
       }
 
       // 2. Fetch indents based on role permissions
-      if (['storekeeper', 'admin', 'hod'].includes(userRole)) {
+      if (['storekeeper', 'admin'].includes(userRole)) {
         const indentsRes = await authFetch(`${API_BASE}/indents`);
         if (indentsRes.ok) {
           const data = await indentsRes.json();
           setIndents(data.data || []);
-        }
-      }
-
-      // Fetch user's own indents for faculty, staff, and HOD
-      if (['faculty', 'staff', 'hod'].includes(userRole)) {
-        const myIndentsRes = await authFetch(`${API_BASE}/indents/mine`);
-        if (myIndentsRes.ok) {
-          const data = await myIndentsRes.json();
-          setMyIndents(data.data || []);
         }
       }
 
@@ -243,15 +261,43 @@ export default function App() {
     }
   }, [currentUser]);
 
-  // Ensure activeTab is valid for currentUser role
+  // Ensure activeTab is valid for currentUser role and handle browser back/forward
   useEffect(() => {
-    if (currentUser?.role) {
-      const allowed = getAllowedTabIds(currentUser.role);
-      if (!allowed.includes(activeTab)) {
-        setActiveTab(getDefaultTabId(currentUser.role));
+    if (!authChecked) return;
+
+    if (!currentUser || !isAllowedDashboardRole(currentUser.role)) {
+      if (window.location.pathname !== '/login') {
+        window.history.replaceState(null, '', '/login');
+      }
+      return;
+    }
+
+    const allowed = getAllowedTabIds(currentUser.role);
+    if (!allowed.includes(activeTab)) {
+      const fallback = getDefaultTabId(currentUser.role);
+      setActiveTab(fallback);
+      if (fallback && window.location.pathname !== `/${fallback}`) {
+        window.history.replaceState(null, '', `/${fallback}`);
       }
     }
-  }, [currentUser, activeTab]);
+
+    const handlePopState = () => {
+      if (!currentUser || !isAllowedDashboardRole(currentUser.role)) {
+        window.history.replaceState(null, '', '/login');
+        return;
+      }
+      const nextTab = resolveTabForUrl(window.location.pathname, currentUser.role);
+      if (nextTab) {
+        setActiveTab(nextTab);
+        if (window.location.pathname !== `/${nextTab}`) {
+          window.history.replaceState(null, '', `/${nextTab}`);
+        }
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [authChecked, currentUser, activeTab]);
 
   // Issue Indent action (Storekeeper / Admin)
   const handleIssueIndent = async (indentId, indentNo) => {
@@ -277,56 +323,6 @@ export default function App() {
     }
   };
 
-  // HOD Approve Indent action
-  const handleApproveIndent = async (indentId, indentNo) => {
-    setLoading(true);
-    try {
-      const res = await authFetch(`${API_BASE}/indents/${indentId}/approve`, {
-        method: 'PATCH'
-      });
-      const json = await res.json();
-      if (res.ok) {
-        showNotification(`Indent ${indentNo} approved by Department Head.`);
-        fetchData();
-      } else {
-        showNotification(json.message || 'Approval failed', 'error');
-      }
-    } catch (err) {
-      if (err.message !== 'Unauthorized') {
-        showNotification('Error approving indent: ' + err.message, 'error');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  // HOD Reject Indent action
-  const handleRejectIndent = async (indentId, indentNo) => {
-    const remarks = window.prompt(`Please provide a reason for rejecting indent ${indentNo}:`, 'Quota exceeded or item unavailable for this semester');
-    if (remarks === null) return; // User cancelled
-
-    setLoading(true);
-    try {
-      const res = await authFetch(`${API_BASE}/indents/${indentId}/reject`, {
-        method: 'PATCH',
-        body: JSON.stringify({ remarks })
-      });
-      const json = await res.json();
-      if (res.ok) {
-        showNotification(`Indent ${indentNo} has been rejected.`, 'error');
-        fetchData();
-      } else {
-        showNotification(json.message || 'Rejection failed', 'error');
-      }
-    } catch (err) {
-      if (err.message !== 'Unauthorized') {
-        showNotification('Error rejecting indent: ' + err.message, 'error');
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
-
   // Stock-In action (Storekeeper / Admin)
   const handleStockInSubmit = async (e) => {
     e.preventDefault();
@@ -345,7 +341,7 @@ export default function App() {
         showNotification(`Stock added: +${stockInForm.quantity} units to inventory!`);
         setStockInForm({ itemId: '', quantity: 10, reference: 'INV-2026-902', supplier: 'Central Stationery Depot' });
         fetchData();
-        setActiveTab('items');
+        navigateToTab('items');
       } else {
         showNotification(json.message || 'Stock-in failed', 'error');
       }
@@ -413,27 +409,56 @@ export default function App() {
     }
   };
 
-  // Device approval toggle (Admin)
+  // Device approval toggle (Admin only)
   const handleToggleDeviceApproval = async (userId, deviceId, currentStatus) => {
-    setLoading(true);
+    if (!currentUser || currentUser.role?.toLowerCase() !== 'admin') {
+      showNotification('Only administrators can approve or revoke devices.', 'error');
+      return;
+    }
+
+    const actionKey = getDeviceActionKey(userId, deviceId);
+    if (inFlightDeviceKeysRef.current.has(actionKey)) {
+      return;
+    }
+
+    setPendingDeviceKeys(prev => ({ ...prev, [actionKey]: true }));
     try {
-      const res = await authFetch(`${API_BASE}/users/${userId}/devices/${deviceId}`, {
-        method: 'PATCH',
-        body: JSON.stringify({ approved: !currentStatus })
+      const result = await updateDeviceApproval({
+        apiBase: API_BASE,
+        fetchFn: authFetch,
+        currentUserRole: currentUser.role,
+        userId,
+        deviceId,
+        approved: !currentStatus,
+        inFlightKeys: inFlightDeviceKeysRef.current
       });
-      const json = await res.json();
-      if (res.ok) {
-        showNotification(json.data?.message || 'Device status updated');
-        fetchData();
-      } else {
-        showNotification(json.message || 'Device approval failed', 'error');
-      }
+
+      if (result.skipped) return;
+
+      setUsersList(prev =>
+        prev.map(u => {
+          if (u._id !== userId) return u;
+          return {
+            ...u,
+            devices: (u.devices || []).map(d =>
+              d.deviceId === deviceId ? { ...d, ...result.device } : d
+            )
+          };
+        })
+      );
+
+      showNotification(result.message);
+      fetchData();
     } catch (err) {
       if (err.message !== 'Unauthorized') {
         showNotification('Error updating device: ' + err.message, 'error');
       }
     } finally {
-      setLoading(false);
+      setPendingDeviceKeys(prev => {
+        const next = { ...prev };
+        delete next[actionKey];
+        return next;
+      });
     }
   };
 
@@ -488,48 +513,6 @@ export default function App() {
     }
   };
 
-  // Mobile App Simulation submit (works for any authenticated user)
-  const handleMobileSubmitIndent = async () => {
-    if (mobileCart.length === 0) {
-      showNotification('Select at least one item first', 'error');
-      return;
-    }
-
-    setBiometricScanning(true);
-    setTimeout(async () => {
-      try {
-        const payload = {
-          items: mobileCart.map(c => ({ itemId: c.itemId, quantity: c.qty })),
-          confirmation: {
-            method: 'biometric',
-            deviceId: currentUser?.devices?.[0]?.deviceId || 'dev-phone-' + (currentUser?.staffId || 'user').toLowerCase()
-          },
-          remarks: mobileRemarks || `${currentUser?.department || 'Department'} requisition request`
-        };
-
-        const res = await authFetch(`${API_BASE}/indents`, {
-          method: 'POST',
-          body: JSON.stringify(payload)
-        });
-        const json = await res.json();
-        if (res.ok && json.data) {
-          setMobileSuccessIndent(json.data);
-          setMobileCart([]);
-          setMobileRemarks('');
-          fetchData();
-        } else {
-          showNotification(json.message || 'Failed to submit indent', 'error');
-        }
-      } catch (err) {
-        if (err.message !== 'Unauthorized') {
-          showNotification('Submission error: ' + err.message, 'error');
-        }
-      } finally {
-        setBiometricScanning(false);
-      }
-    }, 1200);
-  };
-
   // If session is still being checked from localStorage, show spinner
   if (!authChecked) {
     return (
@@ -542,24 +525,22 @@ export default function App() {
     );
   }
 
-  // If user is not authenticated, render dedicated Login Page
-  if (!currentUser) {
-    return <LoginPage onLoginSuccess={handleLoginSuccess} />;
+  // If user is not authenticated or not an allowed dashboard role, render dedicated Login Page
+  if (!currentUser || !isAllowedDashboardRole(currentUser.role)) {
+    return <LoginPage onLoginSuccess={handleLoginSuccess} initialError={authError} />;
   }
 
   // Computed state
   const role = (currentUser.role || '').toLowerCase();
   const allowedTabs = getAllowedTabIds(role);
 
-  // Storekeeper counter queue: indents requested or approved waiting to be issued
-  const pendingCounterIndents = indents.filter(i => i.status === 'REQUESTED' || i.status === 'APPROVED');
-
-  // HOD approvals: indents in HOD's department with status 'REQUESTED'
-  const hodPendingIndents = indents.filter(i => i.status === 'REQUESTED');
+  // Storekeeper counter queue: indents requested or approved waiting to be issued (sorted by urgency & neededBy)
+  const pendingCounterIndents = sortIssueQueueIndents(
+    indents.filter(i => i.status === 'REQUESTED' || i.status === 'APPROVED')
+  );
 
   // Indents to display in Requisition History
-  const displayIndents = role === 'faculty' || role === 'staff' ? myIndents : indents;
-  const filteredIndents = displayIndents.filter(i => {
+  const filteredIndents = indents.filter(i => {
     if (statusFilter !== 'ALL' && i.status !== statusFilter) return false;
     if (searchFilter && !i.indentNo.toLowerCase().includes(searchFilter.toLowerCase())) return false;
     return true;
@@ -577,7 +558,7 @@ export default function App() {
         <ul className="nav-links">
           {/* Issue Queue: Storekeeper, Admin */}
           {allowedTabs.includes('queue') && (
-            <li className={`nav-item ${activeTab === 'queue' ? 'active' : ''}`} onClick={() => setActiveTab('queue')}>
+            <li className={`nav-item ${activeTab === 'queue' ? 'active' : ''}`} onClick={() => navigateToTab('queue')}>
               <ClipboardList size={18} />
               <span>Issue Queue</span>
               {pendingCounterIndents.length > 0 && (
@@ -588,62 +569,41 @@ export default function App() {
             </li>
           )}
 
-          {/* HOD Approvals: HOD */}
-          {allowedTabs.includes('hod-approvals') && (
-            <li className={`nav-item ${activeTab === 'hod-approvals' ? 'active' : ''}`} onClick={() => setActiveTab('hod-approvals')}>
-              <ShieldCheck size={18} />
-              <span>Dept. Approvals</span>
-              {hodPendingIndents.length > 0 && (
-                <span style={{ marginLeft: 'auto', background: '#d97706', color: '#fff', padding: '2px 8px', borderRadius: 12, fontSize: 11, fontWeight: 700 }}>
-                  {hodPendingIndents.length}
-                </span>
-              )}
-            </li>
-          )}
-
           {/* Store Summary: Storekeeper, Admin */}
           {allowedTabs.includes('dashboard') && (
-            <li className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => setActiveTab('dashboard')}>
+            <li className={`nav-item ${activeTab === 'dashboard' ? 'active' : ''}`} onClick={() => navigateToTab('dashboard')}>
               <TrendingUp size={18} />
               <span>Store Summary</span>
             </li>
           )}
 
-          {/* Item Inventory / Catalog: All roles */}
+          {/* Item Inventory / Catalog: Storekeeper, Admin */}
           {allowedTabs.includes('items') && (
-            <li className={`nav-item ${activeTab === 'items' ? 'active' : ''}`} onClick={() => setActiveTab('items')}>
+            <li className={`nav-item ${activeTab === 'items' ? 'active' : ''}`} onClick={() => navigateToTab('items')}>
               <Package size={18} />
-              <span>{['storekeeper', 'admin'].includes(role) ? 'Item Inventory' : 'Stationery Catalog'}</span>
+              <span>Item Inventory</span>
             </li>
           )}
 
           {/* Stock-In: Storekeeper, Admin */}
           {allowedTabs.includes('stockin') && (
-            <li className={`nav-item ${activeTab === 'stockin' ? 'active' : ''}`} onClick={() => setActiveTab('stockin')}>
+            <li className={`nav-item ${activeTab === 'stockin' ? 'active' : ''}`} onClick={() => navigateToTab('stockin')}>
               <Plus size={18} />
               <span>Stock-In (Receive)</span>
             </li>
           )}
 
-          {/* Requisition History: Storekeeper, Admin, HOD */}
+          {/* Requisition History: Storekeeper, Admin */}
           {allowedTabs.includes('history') && (
-            <li className={`nav-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => setActiveTab('history')}>
+            <li className={`nav-item ${activeTab === 'history' ? 'active' : ''}`} onClick={() => navigateToTab('history')}>
               <FileText size={18} />
-              <span>{role === 'hod' ? 'Dept. Requisitions' : 'Requisition History'}</span>
-            </li>
-          )}
-
-          {/* My Requisitions: Faculty / Staff */}
-          {allowedTabs.includes('my-indents') && (
-            <li className={`nav-item ${activeTab === 'my-indents' ? 'active' : ''}`} onClick={() => setActiveTab('my-indents')}>
-              <FileText size={18} />
-              <span>My Requisitions</span>
+              <span>Requisition History</span>
             </li>
           )}
 
           {/* Low Stock & Reports: Storekeeper, Admin */}
           {allowedTabs.includes('reports') && (
-            <li className={`nav-item ${activeTab === 'reports' ? 'active' : ''}`} onClick={() => setActiveTab('reports')}>
+            <li className={`nav-item ${activeTab === 'reports' ? 'active' : ''}`} onClick={() => navigateToTab('reports')}>
               <AlertTriangle size={18} />
               <span>Low Stock & Reports</span>
               {lowStock.length > 0 && (
@@ -656,7 +616,7 @@ export default function App() {
 
           {/* Staff & Devices: Admin only */}
           {allowedTabs.includes('users') && (
-            <li className={`nav-item ${activeTab === 'users' ? 'active' : ''}`} onClick={() => setActiveTab('users')}>
+            <li className={`nav-item ${activeTab === 'users' ? 'active' : ''}`} onClick={() => navigateToTab('users')}>
               <Users size={18} />
               <span>Staff & Devices</span>
             </li>
@@ -664,27 +624,10 @@ export default function App() {
 
           {/* Audit Trail: Admin only */}
           {allowedTabs.includes('audit') && (
-            <li className={`nav-item ${activeTab === 'audit' ? 'active' : ''}`} onClick={() => setActiveTab('audit')}>
+            <li className={`nav-item ${activeTab === 'audit' ? 'active' : ''}`} onClick={() => navigateToTab('audit')}>
               <ShieldCheck size={18} />
               <span>Audit Trail</span>
             </li>
-          )}
-
-          {/* Phone App Simulator: Admin, HOD, Faculty, Staff */}
-          {allowedTabs.includes('mobile-sim') && (
-            <>
-              <div style={{ height: 1, background: '#1e293b', margin: '16px 0' }} />
-              <li
-                className={`nav-item ${activeTab === 'mobile-sim' ? 'active' : ''}`}
-                onClick={() => setActiveTab('mobile-sim')}
-                style={{ border: '1px dashed #38bdf8' }}
-              >
-                <Smartphone size={18} color="#38bdf8" />
-                <span style={{ color: '#38bdf8' }}>
-                  {role === 'admin' ? 'Phone App Simulator' : 'Submit Requisition'}
-                </span>
-              </li>
-            </>
           )}
         </ul>
 
@@ -722,16 +665,13 @@ export default function App() {
           <div>
             <h1 style={{ fontSize: 20, fontWeight: 700 }}>
               {activeTab === 'queue' && 'Counter Issue Queue'}
-              {activeTab === 'hod-approvals' && `Department Requisitions (${currentUser.department})`}
               {activeTab === 'dashboard' && 'Store Management Overview'}
-              {activeTab === 'items' && (['storekeeper', 'admin'].includes(role) ? 'Stationery Item Catalog' : 'Available Stationery Catalog')}
+              {activeTab === 'items' && 'Stationery Item Catalog'}
               {activeTab === 'stockin' && 'Goods Receipt (Stock-In)'}
-              {activeTab === 'history' && (role === 'hod' ? `Requisition Register - ${currentUser.department}` : 'Indent Register & History')}
-              {activeTab === 'my-indents' && 'My Requisition Submissions'}
+              {activeTab === 'history' && 'Indent Register & History'}
               {activeTab === 'reports' && 'Inventory Analytics & Low Stock Reports'}
               {activeTab === 'users' && 'Staff Accounts & Device Security'}
               {activeTab === 'audit' && 'Security Audit Log'}
-              {activeTab === 'mobile-sim' && (role === 'admin' ? 'Faculty Mobile Application (Biometric Flow)' : 'New Stationery Requisition')}
             </h1>
           </div>
 
@@ -758,228 +698,14 @@ export default function App() {
         </header>
 
         <div className="page-body">
-          {/* TAB: HOD APPROVALS */}
-          {activeTab === 'hod-approvals' && (
-            <div>
-              <div className="stat-grid">
-                <div className="stat-box">
-                  <div>
-                    <div className="stat-label">Pending HOD Approval</div>
-                    <div className="stat-num" style={{ color: '#d97706' }}>{hodPendingIndents.length}</div>
-                  </div>
-                  <Clock size={36} color="#f59e0b" />
-                </div>
-                <div className="stat-box">
-                  <div>
-                    <div className="stat-label">Total Dept Indents</div>
-                    <div className="stat-num">{indents.length}</div>
-                  </div>
-                  <ClipboardList size={36} color="#2563eb" />
-                </div>
-                <div className="stat-box">
-                  <div>
-                    <div className="stat-label">Issued / Completed</div>
-                    <div className="stat-num" style={{ color: '#16a34a' }}>
-                      {indents.filter(i => i.status === 'ISSUED').length}
-                    </div>
-                  </div>
-                  <CheckCircle size={36} color="#16a34a" />
-                </div>
-              </div>
-
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Department Requisitions Awaiting Approval</div>
-                  <div style={{ fontSize: 13, color: '#64748b' }}>
-                    Department: <strong>{currentUser.department}</strong> &bull; HOD action authorization
-                  </div>
-                </div>
-
-                {hodPendingIndents.length === 0 ? (
-                  <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
-                    <CheckCircle size={48} color="#16a34a" style={{ margin: '0 auto 12px' }} />
-                    <h3>No pending approvals!</h3>
-                    <p style={{ marginTop: 4 }}>All faculty requisitions for your department have been reviewed.</p>
-                  </div>
-                ) : (
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Indent #</th>
-                        <th>Faculty Requester</th>
-                        <th>Confirmation</th>
-                        <th>Items Requested</th>
-                        <th>Remarks</th>
-                        <th>HOD Decision</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {hodPendingIndents.map(ind => (
-                        <tr key={ind._id}>
-                          <td>
-                            <strong style={{ fontSize: 15 }}>{ind.indentNo}</strong>
-                            <div style={{ fontSize: 12, color: '#64748b' }}>{new Date(ind.createdAt).toLocaleDateString()} {new Date(ind.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                          </td>
-                          <td>
-                            <div style={{ fontWeight: 600 }}>{ind.requester?.name || 'Faculty Member'}</div>
-                            <div style={{ fontSize: 12, color: '#64748b' }}>ID: {ind.requester?.staffId || 'N/A'}</div>
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                              <Fingerprint size={16} color="#16a34a" />
-                              <span className="badge badge-issued" style={{ textTransform: 'capitalize' }}>
-                                {ind.confirmation?.method || 'biometric'}
-                              </span>
-                            </div>
-                            <div style={{ fontSize: 11, color: '#64748b', marginTop: 2 }}>
-                              Device: {ind.confirmation?.deviceId || 'Registered Phone'}
-                            </div>
-                          </td>
-                          <td>
-                            <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
-                              {ind.items.map((it, idx) => (
-                                <li key={idx} style={{ marginBottom: 4 }}>
-                                  <strong>{it.qtyRequested}x</strong> {it.nameSnapshot} <span style={{ fontSize: 11, color: '#64748b' }}>({it.unit})</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </td>
-                          <td>
-                            <span style={{ fontSize: 13, color: '#334155', fontStyle: ind.remarks ? 'normal' : 'italic' }}>
-                              {ind.remarks || 'None specified'}
-                            </span>
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', gap: 8 }}>
-                              <button
-                                onClick={() => handleApproveIndent(ind._id, ind.indentNo)}
-                                className="btn-success"
-                                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '8px 14px' }}>
-                                <Check size={16} />
-                                <span>Approve</span>
-                              </button>
-                              <button
-                                onClick={() => handleRejectIndent(ind._id, ind.indentNo)}
-                                className="btn-danger"
-                                style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, padding: '8px 14px' }}>
-                                <XCircle size={16} />
-                                <span>Reject</span>
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* TAB: ISSUE QUEUE (Storekeeper & Admin) */}
           {activeTab === 'queue' && (
-            <div>
-              <div className="stat-grid">
-                <div className="stat-box">
-                  <div>
-                    <div className="stat-label">Awaiting Issue at Counter</div>
-                    <div className="stat-num" style={{ color: '#d97706' }}>{pendingCounterIndents.length}</div>
-                  </div>
-                  <Clock size={36} color="#f59e0b" />
-                </div>
-                <div className="stat-box">
-                  <div>
-                    <div className="stat-label">Low Stock Alerts</div>
-                    <div className="stat-num" style={{ color: '#dc2626' }}>{lowStock.length}</div>
-                  </div>
-                  <AlertTriangle size={36} color="#ef4444" />
-                </div>
-                <div className="stat-box">
-                  <div>
-                    <div className="stat-label">Total Indents Handled</div>
-                    <div className="stat-num">{indents.length}</div>
-                  </div>
-                  <CheckCircle size={36} color="#16a34a" />
-                </div>
-              </div>
-
-              <div className="card">
-                <div className="card-header">
-                  <div className="card-title">Pending Requisitions for Handover</div>
-                  <div style={{ fontSize: 13, color: '#64748b' }}>Oldest first &bull; Instant atomic stock subtraction</div>
-                </div>
-
-                {pendingCounterIndents.length === 0 ? (
-                  <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
-                    <CheckCircle size={48} color="#16a34a" style={{ margin: '0 auto 12px' }} />
-                    <h3>Queue is clear!</h3>
-                    <p style={{ marginTop: 4 }}>No pending requisitions at the counter right now.</p>
-                  </div>
-                ) : (
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Indent #</th>
-                        <th>Requester / Dept</th>
-                        <th>Verification Status</th>
-                        <th>Items Requested</th>
-                        <th>Action</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {pendingCounterIndents.map(ind => (
-                        <tr key={ind._id}>
-                          <td>
-                            <strong style={{ fontSize: 15 }}>{ind.indentNo}</strong>
-                            <div style={{ fontSize: 12, color: '#64748b' }}>{new Date(ind.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</div>
-                          </td>
-                          <td>
-                            <div style={{ fontWeight: 600 }}>{ind.requester?.name || 'Staff Member'}</div>
-                            <div style={{ fontSize: 12, color: '#64748b' }}>{ind.department} ({ind.requester?.staffId || 'ID'})</div>
-                          </td>
-                          <td>
-                            <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                                <Fingerprint size={16} color="#16a34a" />
-                                <span className="badge badge-issued" style={{ textTransform: 'capitalize' }}>
-                                  {ind.confirmation?.method || 'biometric'} confirmed
-                                </span>
-                              </div>
-                              {ind.status === 'APPROVED' && (
-                                <span className="badge" style={{ background: '#e0f2fe', color: '#0369a1', width: 'fit-content' }}>
-                                  HOD Approved
-                                </span>
-                              )}
-                              <div style={{ fontSize: 11, color: '#64748b' }}>
-                                Device: {ind.confirmation?.deviceId || 'Registered Phone'}
-                              </div>
-                            </div>
-                          </td>
-                          <td>
-                            <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
-                              {ind.items.map((it, idx) => (
-                                <li key={idx} style={{ marginBottom: 4 }}>
-                                  <strong>{it.qtyRequested}x</strong> {it.nameSnapshot} <span style={{ fontSize: 11, color: '#64748b' }}>({it.unit})</span>
-                                </li>
-                              ))}
-                            </ul>
-                          </td>
-                          <td>
-                            <button
-                              onClick={() => handleIssueIndent(ind._id, ind.indentNo)}
-                              className="btn-success"
-                              style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '10px 18px', fontSize: 14 }}>
-                              <CheckCircle size={16} />
-                              <span>Issue & Deduct Stock</span>
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
+            <IssueQueue
+              pendingCounterIndents={pendingCounterIndents}
+              lowStockCount={lowStock.length}
+              totalIndentsCount={indents.length}
+              onIssueIndent={handleIssueIndent}
+            />
           )}
 
           {/* TAB: STORE SUMMARY (Storekeeper & Admin) */}
@@ -1169,7 +895,7 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: REQUISITION HISTORY (Storekeeper, Admin, HOD) */}
+          {/* TAB: REQUISITION HISTORY (Storekeeper & Admin) */}
           {activeTab === 'history' && (
             <div>
               <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
@@ -1227,74 +953,6 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: MY INDENTS (Faculty & Staff) */}
-          {activeTab === 'my-indents' && (
-            <div>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
-                <div>
-                  <h3 style={{ fontSize: 18 }}>My Submitted Requisitions</h3>
-                  <p style={{ fontSize: 13, color: '#64748b' }}>Track approval and collection status of your stationery requests</p>
-                </div>
-                <button
-                  onClick={() => setActiveTab('mobile-sim')}
-                  className="btn-primary"
-                  style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Plus size={16} />
-                  <span>New Requisition</span>
-                </button>
-              </div>
-
-              <div className="card">
-                {myIndents.length === 0 ? (
-                  <div style={{ padding: 48, textAlign: 'center', color: '#64748b' }}>
-                    <ClipboardList size={48} color="#94a3b8" style={{ margin: '0 auto 12px' }} />
-                    <h3>No requisitions submitted yet</h3>
-                    <p style={{ marginTop: 4 }}>Use the 'New Requisition' button to request items from the central store.</p>
-                  </div>
-                ) : (
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Indent #</th>
-                        <th>Submitted At</th>
-                        <th>Items Requested</th>
-                        <th>Confirmation</th>
-                        <th>Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {myIndents.map(ind => (
-                        <tr key={ind._id}>
-                          <td><strong>{ind.indentNo}</strong></td>
-                          <td>{new Date(ind.createdAt).toLocaleString()}</td>
-                          <td>
-                            <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
-                              {ind.items.map((it, idx) => (
-                                <li key={idx} style={{ marginBottom: 2 }}>
-                                  <strong>{it.qtyRequested}x</strong> {it.nameSnapshot} ({it.unit})
-                                </li>
-                              ))}
-                            </ul>
-                          </td>
-                          <td>
-                            <span style={{ fontSize: 12, color: '#64748b' }}>
-                              {ind.confirmation?.method || 'biometric'} confirmed
-                            </span>
-                          </td>
-                          <td>
-                            <span className={`badge badge-${ind.status.toLowerCase()}`}>
-                              {ind.status}
-                            </span>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </div>
-            </div>
-          )}
-
           {/* TAB: REPORTS & LOW STOCK (Storekeeper & Admin) */}
           {activeTab === 'reports' && (
             <div>
@@ -1337,7 +995,7 @@ export default function App() {
           )}
 
           {/* TAB: USERS & DEVICE SECURITY (Admin only) */}
-          {activeTab === 'users' && (
+          {activeTab === 'users' && role === 'admin' && (
             <div>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
                 <div>
@@ -1388,26 +1046,38 @@ export default function App() {
                             <span style={{ fontSize: 12, color: '#94a3b8', fontStyle: 'italic' }}>No devices registered</span>
                           ) : (
                             <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                              {u.devices.map((d, dIdx) => (
-                                <div key={dIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', padding: '4px 8px', borderRadius: 4, border: '1px solid #e2e8f0' }}>
-                                  <Smartphone size={14} color="#64748b" />
-                                  <span style={{ fontSize: 12, fontWeight: 600 }}>{d.label || d.deviceId}</span>
-                                  <span className={`badge ${d.approved ? 'badge-issued' : 'badge-requested'}`} style={{ fontSize: 10 }}>
-                                    {d.approved ? 'Approved' : 'Pending'}
-                                  </span>
-                                  <button
-                                    onClick={() => handleToggleDeviceApproval(u._id, d.deviceId, d.approved)}
-                                    style={{
-                                      fontSize: 11,
-                                      padding: '2px 6px',
-                                      background: d.approved ? '#fee2e2' : '#dcfce7',
-                                      color: d.approved ? '#991b1b' : '#166534',
-                                      marginLeft: 'auto'
-                                    }}>
-                                    {d.approved ? 'Revoke' : 'Approve'}
-                                  </button>
-                                </div>
-                              ))}
+                              {u.devices.map((d, dIdx) => {
+                                const actionKey = getDeviceActionKey(u._id, d.deviceId);
+                                const isUpdating = Boolean(pendingDeviceKeys[actionKey]);
+                                return (
+                                  <div key={d.deviceId || dIdx} style={{ display: 'flex', alignItems: 'center', gap: 8, background: '#f8fafc', padding: '4px 8px', borderRadius: 4, border: '1px solid #e2e8f0' }}>
+                                    <Smartphone size={14} color="#64748b" />
+                                    <span style={{ fontSize: 12, fontWeight: 600 }}>{d.label || d.deviceId}</span>
+                                    <span className={`badge ${d.approved ? 'badge-issued' : 'badge-requested'}`} style={{ fontSize: 10 }}>
+                                      {d.approved ? 'Approved' : 'Pending Approval'}
+                                    </span>
+                                    {role === 'admin' && (
+                                      <button
+                                        type="button"
+                                        disabled={isUpdating}
+                                        onClick={() => handleToggleDeviceApproval(u._id, d.deviceId, Boolean(d.approved))}
+                                        style={{
+                                          fontSize: 11,
+                                          padding: '2px 8px',
+                                          background: d.approved ? '#fee2e2' : '#dcfce7',
+                                          color: d.approved ? '#991b1b' : '#166534',
+                                          marginLeft: 'auto',
+                                          opacity: isUpdating ? 0.6 : 1,
+                                          cursor: isUpdating ? 'not-allowed' : 'pointer'
+                                        }}>
+                                        {isUpdating
+                                          ? (d.approved ? 'Revoking...' : 'Approving...')
+                                          : (d.approved ? 'Revoke' : 'Approve')}
+                                      </button>
+                                    )}
+                                  </div>
+                                );
+                              })}
                             </div>
                           )}
                         </td>
@@ -1428,7 +1098,7 @@ export default function App() {
           )}
 
           {/* TAB: AUDIT LOG (Admin only) */}
-          {activeTab === 'audit' && (
+          {activeTab === 'audit' && role === 'admin' && (
             <div>
               <div className="card">
                 <div className="card-header">
@@ -1460,139 +1130,6 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB: PHONE APP SIMULATOR (Authenticated Requisition Flow) */}
-          {activeTab === 'mobile-sim' && (
-            <div style={{ display: 'flex', justifyContent: 'center', padding: '20px 0' }}>
-              <div style={{
-                width: 380,
-                height: 720,
-                background: '#090d16',
-                borderRadius: 40,
-                border: '12px solid #1e293b',
-                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                color: '#fff',
-                position: 'relative'
-              }}>
-                {/* Phone Speaker Notch */}
-                <div style={{ width: 120, height: 18, background: '#1e293b', margin: '0 auto', borderBottomLeftRadius: 10, borderBottomRightRadius: 10 }} />
-
-                {/* Mobile Header */}
-                <div style={{ padding: '16px 20px', borderBottom: '1px solid #1e293b' }}>
-                  <div style={{ fontSize: 12, color: '#38bdf8' }}>Institutional Requisition Portal</div>
-                  <div style={{ fontSize: 16, fontWeight: 700 }}>{currentUser.name}</div>
-                  <div style={{ fontSize: 11, color: '#94a3b8' }}>{currentUser.department} &bull; ID: {currentUser.staffId}</div>
-                </div>
-
-                {/* Mobile Screen Content */}
-                <div style={{ flex: 1, padding: 16, overflowY: 'auto' }}>
-                  {mobileSuccessIndent ? (
-                    <div style={{ textAlign: 'center', padding: '40px 10px' }}>
-                      <CheckCircle size={60} color="#22c55e" style={{ margin: '0 auto 16px' }} />
-                      <h2 style={{ fontSize: 20 }}>Indent Submitted!</h2>
-                      <div style={{ background: '#1e293b', padding: '12px', borderRadius: 8, margin: '20px 0' }}>
-                        <div style={{ fontSize: 12, color: '#94a3b8' }}>Indent Number</div>
-                        <div style={{ fontSize: 18, fontWeight: 700, color: '#38bdf8' }}>{mobileSuccessIndent.indentNo}</div>
-                      </div>
-                      <p style={{ fontSize: 12, color: '#94a3b8' }}>Confirmed via phone fingerprint. Walk to the counter to collect your items.</p>
-                      <button
-                        onClick={() => setMobileSuccessIndent(null)}
-                        style={{ marginTop: 24, width: '100%', padding: 12, background: '#2563eb', color: '#fff' }}>
-                        Make Another Request
-                      </button>
-                    </div>
-                  ) : (
-                    <div>
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8, color: '#cbd5e1' }}>Select Items to Requisition:</div>
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 260, overflowY: 'auto', marginBottom: 16 }}>
-                        {items.slice(0, 8).map(it => {
-                          const inCart = mobileCart.find(c => c.itemId === it._id);
-                          return (
-                            <div key={it._id} style={{ background: '#1e293b', padding: '10px 12px', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <div>
-                                <div style={{ fontSize: 13, fontWeight: 600 }}>{it.name}</div>
-                                <div style={{ fontSize: 11, color: '#94a3b8' }}>Stock: {it.stock} {it.unit}</div>
-                              </div>
-                              <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                                {inCart ? (
-                                  <>
-                                    <button
-                                      onClick={() => setMobileCart(mobileCart.map(c => c.itemId === it._id ? { ...c, qty: Math.max(0, c.qty - 1) } : c).filter(c => c.qty > 0))}
-                                      style={{ width: 26, height: 26, background: '#334155', color: '#fff', borderRadius: 4 }}>-</button>
-                                    <span style={{ fontSize: 13, fontWeight: 700 }}>{inCart.qty}</span>
-                                    <button
-                                      onClick={() => setMobileCart(mobileCart.map(c => c.itemId === it._id ? { ...c, qty: c.qty + 1 } : c))}
-                                      style={{ width: 26, height: 26, background: '#334155', color: '#fff', borderRadius: 4 }}>+</button>
-                                  </>
-                                ) : (
-                                  <button
-                                    onClick={() => setMobileCart([...mobileCart, { itemId: it._id, name: it.name, qty: 1 }])}
-                                    style={{ fontSize: 12, padding: '4px 10px', background: '#2563eb', color: '#fff' }}>Add</button>
-                                )}
-                              </div>
-                            </div>
-                          );
-                        })}
-                      </div>
-
-                      <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6, color: '#cbd5e1' }}>Cart Summary:</div>
-                      {mobileCart.length === 0 ? (
-                        <div style={{ fontSize: 12, color: '#64748b', fontStyle: 'italic', marginBottom: 16 }}>No items selected yet.</div>
-                      ) : (
-                        <div style={{ background: '#0f172a', border: '1px solid #1e293b', borderRadius: 8, padding: 10, marginBottom: 16 }}>
-                          {mobileCart.map((c, idx) => (
-                            <div key={idx} style={{ fontSize: 12, display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                              <span>{c.name}</span>
-                              <strong>x{c.qty}</strong>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-
-                      <div style={{ marginBottom: 16 }}>
-                        <input
-                          type="text"
-                          placeholder="Requisition purpose / remark..."
-                          value={mobileRemarks}
-                          onChange={e => setMobileRemarks(e.target.value)}
-                          style={{ width: '100%', background: '#1e293b', border: '1px solid #334155', color: '#fff', fontSize: 12 }}
-                        />
-                      </div>
-
-                      {/* Fingerprint Submit Area */}
-                      <div style={{ background: '#111827', border: '1px solid #374151', borderRadius: 12, padding: 14, textAlign: 'center' }}>
-                        <div style={{ fontSize: 12, color: '#9ca3af', marginBottom: 10 }}>
-                          Touch fingerprint sensor to confirm Requisition
-                        </div>
-
-                        <button
-                          onClick={handleMobileSubmitIndent}
-                          disabled={biometricScanning || mobileCart.length === 0}
-                          style={{
-                            width: 64,
-                            height: 64,
-                            borderRadius: 32,
-                            background: biometricScanning ? '#16a34a' : '#2563eb',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                            margin: '0 auto',
-                            boxShadow: '0 0 20px rgba(37, 99, 235, 0.4)'
-                          }}>
-                          <Fingerprint size={36} color="#fff" />
-                        </button>
-                        <div style={{ fontSize: 11, color: biometricScanning ? '#22c55e' : '#60a5fa', marginTop: 8, fontWeight: 600 }}>
-                          {biometricScanning ? 'Verifying Biometric Fingerprint...' : 'Hold Finger to Confirm'}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
         </div>
       </main>
 

@@ -1,12 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Lock, User, Eye, EyeOff, LogIn, Loader2, AlertCircle, Building2 } from 'lucide-react';
+import { isAllowedDashboardRole, UNAUTHORIZED_MESSAGE } from '../utils/authAccess';
 
-export default function LoginPage({ onLoginSuccess }) {
+export default function LoginPage({ onLoginSuccess, initialError = '' }) {
   const [staffId, setStaffId] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState('');
+  const [error, setError] = useState(initialError);
+
+  useEffect(() => {
+    if (initialError) {
+      setError(initialError);
+    }
+  }, [initialError]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -41,6 +48,12 @@ export default function LoginPage({ onLoginSuccess }) {
 
       if (!data.data?.token || !data.data?.user) {
         throw new Error('Authentication failed: Malformed server response.');
+      }
+
+      if (!isAllowedDashboardRole(data.data.user.role)) {
+        localStorage.removeItem('stationery_token');
+        localStorage.removeItem('stationery_user');
+        throw new Error(UNAUTHORIZED_MESSAGE);
       }
 
       // Pass token and user object to parent handler
@@ -151,7 +164,7 @@ export default function LoginPage({ onLoginSuccess }) {
 
         {/* Institutional Demo Credentials Reference */}
         <div className="demo-credentials-box">
-          <div className="demo-title">Institutional Demo Accounts:</div>
+          <div className="demo-title">Admin &amp; Storekeeper Demo Accounts:</div>
           <div className="demo-roles-grid">
             <button
               type="button"
@@ -169,24 +182,8 @@ export default function LoginPage({ onLoginSuccess }) {
             >
               <strong>EMP001</strong> &bull; Admin
             </button>
-            <button
-              type="button"
-              className="demo-pill"
-              onClick={() => handleFillDemo('HOD01')}
-              title="Department Head (CSE)"
-            >
-              <strong>HOD01</strong> &bull; HOD
-            </button>
-            <button
-              type="button"
-              className="demo-pill"
-              onClick={() => handleFillDemo('FAC101')}
-              title="Department Faculty"
-            >
-              <strong>FAC101</strong> &bull; Faculty
-            </button>
           </div>
-          <div className="demo-note">Click any account to pre-fill credentials (Password: <code>Password@123</code>).</div>
+          <div className="demo-note">Click an account to pre-fill credentials (Password: <code>Password@123</code>).</div>
         </div>
       </div>
     </div>
